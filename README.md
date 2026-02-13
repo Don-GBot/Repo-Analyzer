@@ -81,11 +81,28 @@ GITHUB_TOKEN=ghp_xxx node analyze.js owner/repo
 ────────────────────────────────────────────────────────────
 ```
 
+## GitHub Token (recommended)
+
+Without a token: 60 API requests/hour (~7 repo scans). With a token: 5,000/hour.
+
+1. Go to [GitHub Settings → Developer settings → Fine-grained tokens](https://github.com/settings/tokens?type=beta)
+2. Generate new token — name it anything, set "Public repositories (read-only)", no other permissions
+3. Use it:
+
+```bash
+# Option A: env var (recommended)
+export GITHUB_TOKEN=github_pat_xxx
+node analyze.js owner/repo
+
+# Option B: per-command
+node analyze.js owner/repo --token github_pat_xxx
+```
+
+Each user needs their own token. Rate limits are per-token, not shared.
+
 ## How It Works
 
 Single script using the GitHub REST API. Pulls repo metadata, commit history, contributor profiles, file tree, and raw README content. Analyzes everything locally.
-
-Works without auth (60 req/hour). Set `GITHUB_TOKEN` for 5,000 req/hour.
 
 ## License
 
