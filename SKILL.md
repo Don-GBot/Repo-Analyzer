@@ -1,6 +1,6 @@
 ---
 name: repo-analyzer
-description: GitHub repository trust scoring and due diligence. Use when asked to analyze, audit, score, or evaluate any GitHub repo — especially for crypto/DeFi project DD, checking if a repo is legit, evaluating code quality, verifying team credibility, or comparing multiple repos. Triggers on phrases like "analyze this repo", "is this legit", "check this GitHub", "trust score", "audit this project", "repo quality", "batch scan repos".
+description: GitHub repository trust scoring and due diligence. Use when asked to analyze, audit, score, or evaluate any GitHub repo — especially for crypto/DeFi project DD, checking if a repo is legit, evaluating code quality, verifying team credibility, or comparing multiple repos. Also handles X/Twitter URLs containing GitHub links — auto-extracts and analyzes repos from tweets. Triggers on phrases like "analyze this repo", "is this legit", "check this GitHub", "trust score", "audit this project", "repo quality", "batch scan repos", "analyze this tweet".
 ---
 
 # Repo Analyzer
@@ -12,6 +12,9 @@ Zero-dependency GitHub trust scorer. Runs 29 analysis modules across 12 scoring 
 ```bash
 # Single repo
 node scripts/analyze.js <owner/repo or github-url> [flags]
+
+# From a tweet (auto-extracts GitHub links)
+node scripts/analyze.js <x.com-or-twitter.com-url> [flags]
 
 # Batch mode
 node scripts/analyze.js --file <repos.txt> [--json]

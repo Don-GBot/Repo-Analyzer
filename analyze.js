@@ -82,6 +82,87 @@ function parseRepo(input) {
   return null;
 }
 
+// --- Resolve t.co short URLs ---
+function resolveUrl(shortUrl) {
+  return new Promise((resolve) => {
+    const u = new URL(shortUrl);
+    const req = https.request({
+      hostname: u.hostname, path: u.pathname,
+      method: 'HEAD',
+      headers: { 'User-Agent': 'github-analyzer/1.0' },
+    }, res => {
+      if (res.headers.location) resolve(res.headers.location);
+      else resolve(shortUrl);
+    });
+    req.on('error', () => resolve(shortUrl));
+    req.end();
+  });
+}
+
+// --- Extract GitHub repos from X/Twitter URLs ---
+async function extractReposFromTweet(url) {
+  const { execSync } = require('child_process');
+  const repos = [];
+
+  // Try bird CLI first
+  try {
+    const output = execSync(`bird read "${url}" 2>/dev/null`, {
+      timeout: 15000,
+      env: { ...process.env },
+    }).toString();
+
+    // Find t.co links and resolve them
+    const tcoLinks = output.match(/https?:\/\/t\.co\/\w+/g) || [];
+    for (const link of tcoLinks) {
+      try {
+        const resolved = await resolveUrl(link);
+        const parsed = parseRepo(resolved);
+        if (parsed) repos.push(parsed);
+      } catch {}
+    }
+
+    // Also check for direct GitHub URLs in the output
+    const ghLinks = output.match(/https?:\/\/github\.com\/[^\s'"`)>\]]+/g) || [];
+    for (const link of ghLinks) {
+      const parsed = parseRepo(link);
+      if (parsed && !repos.some(r => r.owner === parsed.owner && r.repo === parsed.repo)) {
+        repos.push(parsed);
+      }
+    }
+
+    return { repos, tweetText: output };
+  } catch {}
+
+  // Fallback: try web fetch via nitter or direct
+  try {
+    // Try to fetch via basic HTTP and look for GitHub links
+    const tweetId = url.match(/status\/(\d+)/)?.[1];
+    if (tweetId) {
+      // Use syndication API (public, no auth)
+      const res = await get(`https://cdn.syndication.twimg.com/tweet-result?id=${tweetId}&token=0`);
+      if (res.data?.text) {
+        const text = res.data.text;
+        const entities = res.data.entities?.urls || [];
+        for (const entity of entities) {
+          const expanded = entity.expanded_url || entity.url;
+          if (expanded) {
+            const parsed = parseRepo(expanded);
+            if (parsed) repos.push(parsed);
+          }
+        }
+        return { repos, tweetText: text };
+      }
+    }
+  } catch {}
+
+  return { repos, tweetText: null };
+}
+
+// --- Check if input is an X/Twitter URL ---
+function isTwitterUrl(input) {
+  return /^https?:\/\/(x\.com|twitter\.com)\/\w+\/status\/\d+/i.test(input.trim());
+}
+
 // --- Analysis modules ---
 
 async function analyzeRepo(owner, repo) {
@@ -2199,9 +2280,36 @@ async function main() {
   const input = positionals[0];
   if (!input) {
     console.error('Usage: node analyze.js <github-url-or-owner/repo> [--json] [--verbose] [--oneline] [--badge]');
+    console.error('       node analyze.js <x.com-or-twitter.com-tweet-url>');
     console.error('       node analyze.js --file repos.txt [--json]');
     console.error('  Optional: --token <github-token> or GITHUB_TOKEN env var for higher rate limits');
     process.exit(1);
+  }
+
+  // Handle X/Twitter URLs — extract GitHub repos from tweets
+  if (isTwitterUrl(input)) {
+    console.error('Detected X/Twitter URL — extracting GitHub repos from tweet...');
+    const { repos, tweetText } = await extractReposFromTweet(input);
+    if (repos.length === 0) {
+      console.error('No GitHub repos found in tweet.');
+      if (tweetText) console.error(`Tweet content:\n${tweetText}`);
+      process.exit(1);
+    }
+    console.error(`Found ${repos.length} repo${repos.length > 1 ? 's' : ''}: ${repos.map(r => `${r.owner}/${r.repo}`).join(', ')}\n`);
+
+    for (const parsed of repos) {
+      try {
+        const results = await analyzeRepo(parsed.owner, parsed.repo);
+        if (args.json) console.log(JSON.stringify(results, null, 2));
+        else if (args.oneline) {
+          const flagStr = results.flags.length > 0 ? ` — ${results.flags.length} flags` : '';
+          console.log(`${results.meta.name}: ${results.trustScore}/100 [${results.grade}]${flagStr}`);
+        } else printReport(results);
+      } catch (e) {
+        console.error(`Error analyzing ${parsed.owner}/${parsed.repo}: ${e.message}`);
+      }
+    }
+    return;
   }
 
   const parsed = parseRepo(input);
