@@ -1,57 +1,63 @@
 # Repo Analyzer ⚡
 
-Trust scoring for GitHub repos. One command, full breakdown. Built for crypto due diligence — catches rugs, fakes, and AI slop before you ape.
+Trust scoring for GitHub repos. One command, full breakdown. Built for crypto due diligence — spots faked commits, throwaway accounts, and generated READMEs.
 
 ```
 node analyze.js <github-url-or-owner/repo>
 ```
 
-Zero dependencies. Just Node.js 20+.
+Zero dependencies. Node.js 20+ only.
 
 ## What It Checks
 
-- **Commit Health** — real development or code dump? Evenly-spaced commits (faked history), GPG signatures, commit frequency
-- **Contributors** — account age, repo count, follower count. Flags fresh throwaway accounts
-- **Code Quality** — tests, CI/CD, license, lock files, docs, changelog, .gitignore
-- **AI Slop Detection** — scans README for AI-generated patterns ("comprehensive solution", "leveraging the power", "seamless", etc.), emoji density
-- **Social Signals** — star/fork ratio, botted star detection (high stars + no forks/contributors)
-- **Activity** — last push date, release history, staleness
-- **Crypto Red Flags** — pump.fun token mints, placeholder program IDs (not deployed), hardcoded wallets, rug pull patterns
-- **Security** — exposed credential files, private keys in repo
+**Commit Health** — real development or code dump? Detects evenly-spaced timestamps (faked history), checks GPG signatures, separates human vs bot commits (dependabot, github-actions)
+
+**Contributors** — checks account age, repo count, followers. Flags fresh throwaway accounts created just for the project
+
+**Code Quality** — tests, CI/CD, license, lock files, docs, changelog, .gitignore. Missing basics = missing trust
+
+**AI Detection** — scans README for generated text patterns, measures emoji density, flags long READMEs on repos with few commits
+
+**Social Signals** — star/fork ratio analysis. High stars with no forks and one contributor = likely botted
+
+**Activity** — last push date, release history, repo age vs commit count
+
+**Crypto Checks** — token mints from launchpads, placeholder program IDs (contract not deployed), hardcoded wallet addresses, rug pull patterns in config files
+
+**Security** — exposed credential files, private keys committed to repo (excludes test fixtures)
 
 ## Trust Score
 
-0-100 score with letter grade:
+0-100 with letter grade:
 
-- **A (85-100)** — Legit. Well-maintained, real development, trustworthy.
-- **B (70-84)** — Solid. Good signs, minor gaps. Probably legit.
-- **C (55-69)** — Mixed. Some concerns. Do more research.
-- **D (40-54)** — Sketchy. Multiple red flags. Extreme caution.
-- **F (0-39)** — Avoid. High probability of scam/fake/abandoned.
+- **A (85-100)** — Legit. Real development, real contributors, maintained.
+- **B (70-84)** — Solid. Minor gaps but probably trustworthy.
+- **C (55-69)** — Mixed. Needs more research before trusting.
+- **D (40-54)** — Sketchy. Multiple red flags.
+- **F (0-39)** — Avoid. Likely scam, fake, or abandoned.
 
-## Examples
+## Usage
 
 ```bash
-# Analyze any repo
+# Analyze any public repo
 node analyze.js https://github.com/openclaw/openclaw
-node analyze.js ahhimquesting/quest-mvp
-node analyze.js Don-GBot/G-Alpha
+node analyze.js owner/repo
 
-# JSON output (for piping)
-node analyze.js openclaw/openclaw --json
+# JSON output for scripts/pipelines
+node analyze.js owner/repo --json
 
-# Verbose mode (shows progress)
-node analyze.js openclaw/openclaw --verbose
+# Verbose (shows progress)
+node analyze.js owner/repo --verbose
 
-# With GitHub token (higher rate limits)
-GITHUB_TOKEN=ghp_xxx node analyze.js openclaw/openclaw
+# Higher rate limits with GitHub token
+GITHUB_TOKEN=ghp_xxx node analyze.js owner/repo
 ```
 
 ## Sample Output
 
 ```
 ════════════════════════════════════════════════════════════
-  GITHUB REPO ANALYSIS: ahhimquesting/quest-mvp
+  GITHUB REPO ANALYSIS: owner/repo
 ════════════════════════════════════════════════════════════
 
   TRUST SCORE: 56/100 [C]
@@ -66,34 +72,20 @@ GITHUB_TOKEN=ghp_xxx node analyze.js openclaw/openclaw
     Activity           ████████░░ 8/10
     Crypto Safety      ░░░░░░░░░░ 0/5
 
-  🚩 FLAGS:
-    - Placeholder program ID — not deployed
-    - Token mint with pump.fun pattern
-    - Placeholder program ID in contracts/Anchor.toml — not deployed
+  FLAGS:
+    - Placeholder program ID — contract not deployed
+    - Launchpad token mint in config
+    - 0% GPG signed commits — author identity unverified
 
-────────────────────────────────────────────────────────────
-  VERDICT [C]: MIXED — Some concerns. Do more research before trusting.
+  VERDICT [C]: MIXED — Needs more research before trusting.
 ────────────────────────────────────────────────────────────
 ```
 
 ## How It Works
 
-Single Node.js script, zero external dependencies. Uses the GitHub REST API to pull:
-- Repository metadata
-- Commit history (last 100)
-- Contributor profiles + account ages
-- File tree (for quality signals)
-- Raw README (for AI slop detection)
-- Config files (for crypto-specific checks)
+Single script using the GitHub REST API. Pulls repo metadata, commit history, contributor profiles, file tree, and raw README content. Analyzes everything locally.
 
-Works without a GitHub token (60 requests/hour). Add `GITHUB_TOKEN` env var for 5,000 requests/hour.
-
-## Use Cases
-
-- **Crypto due diligence** — someone shares a repo claiming a big-name dev is involved? Check if commits are signed, accounts are real, and code is actually deployed
-- **Before you ape** — token project links a GitHub? Run it through the analyzer first
-- **General repo assessment** — evaluate any open source project's health and trustworthiness
-- **CI integration** — use `--json` output in automated pipelines
+Works without auth (60 req/hour). Set `GITHUB_TOKEN` for 5,000 req/hour.
 
 ## License
 
