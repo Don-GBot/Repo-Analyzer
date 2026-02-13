@@ -783,6 +783,307 @@ async function analyzeRepo(owner, repo) {
 
   results.pluginFormats = pluginFormats;
 
+  // 14. License risk scoring
+  if (v) console.error('Scoring license risk...');
+  const licenseRisk = { license: r.license?.spdx_id || null, risk: 'unknown', details: '' };
+  const permissive = ['MIT', 'Apache-2.0', 'BSD-2-Clause', 'BSD-3-Clause', 'ISC', 'Unlicense', '0BSD', 'CC0-1.0'];
+  const copyleft = ['GPL-2.0', 'GPL-3.0', 'AGPL-3.0', 'LGPL-2.1', 'LGPL-3.0', 'MPL-2.0', 'EUPL-1.2'];
+  const weak = ['LGPL-2.1', 'LGPL-3.0', 'MPL-2.0']; // copyleft but weaker
+  if (!licenseRisk.license || licenseRisk.license === 'NOASSERTION') {
+    licenseRisk.risk = 'high';
+    licenseRisk.details = 'No license — legally cannot use, fork, or modify';
+    results.flags.push('No license detected — all rights reserved by default');
+  } else if (permissive.includes(licenseRisk.license)) {
+    licenseRisk.risk = 'low';
+    licenseRisk.details = `${licenseRisk.license} — permissive, safe for commercial use`;
+  } else if (weak.includes(licenseRisk.license)) {
+    licenseRisk.risk = 'medium';
+    licenseRisk.details = `${licenseRisk.license} — weak copyleft, usable with care`;
+  } else if (copyleft.includes(licenseRisk.license)) {
+    licenseRisk.risk = 'high';
+    licenseRisk.details = `${licenseRisk.license} — strong copyleft, derivatives must be open source`;
+  } else {
+    licenseRisk.risk = 'unknown';
+    licenseRisk.details = `${licenseRisk.license} — uncommon license, review manually`;
+  }
+  results.licenseRisk = licenseRisk;
+
+  // 15. Abandoned project detection
+  if (v) console.error('Checking project health status...');
+  const daysSincePush = (Date.now() - new Date(r.pushed_at).getTime()) / 86400000;
+  let projectStatus = 'active';
+  const abandonedSignals = [];
+
+  if (r.archived) {
+    projectStatus = 'archived';
+    abandonedSignals.push('Repo is archived');
+  } else if (daysSincePush > 365) {
+    projectStatus = 'abandoned';
+    abandonedSignals.push(`No commits in ${Math.floor(daysSincePush)} days`);
+  } else if (daysSincePush > 180) {
+    projectStatus = 'stale';
+    abandonedSignals.push(`Last push ${Math.floor(daysSincePush)} days ago`);
+  }
+
+  // Check for unanswered issues
+  if (r.has_issues && r.open_issues_count > 0) {
+    const issuesRes = await get(`${base}/issues?state=open&sort=created&direction=asc&per_page=10`);
+    const issues = (issuesRes.data || []).filter(i => !i.pull_request); // exclude PRs
+    const oldUnanswered = issues.filter(i => {
+      const age = (Date.now() - new Date(i.created_at).getTime()) / 86400000;
+      return age > 90 && i.comments === 0;
+    });
+    if (oldUnanswered.length >= 3) {
+      abandonedSignals.push(`${oldUnanswered.length} issues open 90+ days with zero responses`);
+      if (projectStatus === 'active') projectStatus = 'neglected';
+    }
+  }
+
+  results.projectStatus = { status: projectStatus, signals: abandonedSignals, daysSincePush: Math.floor(daysSincePush) };
+
+  // 16. Fork quality check
+  if (v) console.error('Checking fork quality...');
+  const forkAnalysis = { isFork: r.fork, parent: r.parent?.full_name || null };
+  if (r.fork && r.parent) {
+    try {
+      const parentRes = await get(`https://api.github.com/repos/${r.parent.full_name}`);
+      if (parentRes.data) {
+        const p = parentRes.data;
+        forkAnalysis.parentStars = p.stargazers_count;
+        forkAnalysis.parentUpdated = p.pushed_at;
+        // Compare commit counts via comparing branches
+        const compareRes = await get(`${base}/compare/${p.default_branch}...${r.default_branch}`);
+        if (compareRes.data) {
+          forkAnalysis.aheadBy = compareRes.data.ahead_by || 0;
+          forkAnalysis.behindBy = compareRes.data.behind_by || 0;
+          if (forkAnalysis.aheadBy === 0) {
+            forkAnalysis.quality = 'zero-change';
+            results.flags.push(`Fork of ${r.parent.full_name} with 0 changes — no original work`);
+          } else if (forkAnalysis.aheadBy < 5) {
+            forkAnalysis.quality = 'minimal';
+          } else {
+            forkAnalysis.quality = 'diverged';
+          }
+        }
+      }
+    } catch {}
+  }
+  results.forkAnalysis = forkAnalysis;
+
+  // 17. Commit velocity trends
+  if (v) console.error('Analyzing commit velocity...');
+  const velocityTrend = { trend: 'unknown', periods: [] };
+  if (commitDates.length >= 10) {
+    const mid = Math.floor(commitDates.length / 2);
+    const recentHalf = commitDates.slice(0, mid);
+    const olderHalf = commitDates.slice(mid);
+
+    const recentSpan = recentHalf.length > 1 ? (recentHalf[0] - recentHalf[recentHalf.length - 1]) / 86400000 : 1;
+    const olderSpan = olderHalf.length > 1 ? (olderHalf[0] - olderHalf[olderHalf.length - 1]) / 86400000 : 1;
+
+    const recentRate = recentHalf.length / Math.max(recentSpan, 1);
+    const olderRate = olderHalf.length / Math.max(olderSpan, 1);
+
+    velocityTrend.recentRate = Math.round(recentRate * 100) / 100;
+    velocityTrend.olderRate = Math.round(olderRate * 100) / 100;
+
+    if (recentRate > olderRate * 1.5) velocityTrend.trend = 'accelerating';
+    else if (recentRate < olderRate * 0.5) velocityTrend.trend = 'declining';
+    else velocityTrend.trend = 'steady';
+  }
+  results.velocityTrend = velocityTrend;
+
+  // 18. Issue response time
+  if (v) console.error('Checking issue response time...');
+  const issueResponse = { avgResponseHrs: null, respondedPct: null, sampleSize: 0 };
+  if (r.has_issues) {
+    try {
+      const closedIssuesRes = await get(`${base}/issues?state=closed&sort=updated&direction=desc&per_page=15`);
+      const closedIssues = (closedIssuesRes.data || []).filter(i => !i.pull_request);
+      let totalResponseMs = 0;
+      let responded = 0;
+
+      for (const issue of closedIssues.slice(0, 10)) {
+        if (issue.comments > 0) {
+          // First comment time approximation: use closed_at as rough proxy if fast
+          const created = new Date(issue.created_at);
+          const closed = new Date(issue.closed_at);
+          const responseMs = closed - created;
+          totalResponseMs += responseMs;
+          responded++;
+        }
+      }
+
+      issueResponse.sampleSize = closedIssues.slice(0, 10).length;
+      if (responded > 0) {
+        issueResponse.avgResponseHrs = Math.round(totalResponseMs / responded / 3600000);
+        issueResponse.respondedPct = Math.round(responded / issueResponse.sampleSize * 100);
+      }
+    } catch {}
+  }
+  results.issueResponse = issueResponse;
+
+  // 19. PR merge patterns
+  if (v) console.error('Analyzing PR patterns...');
+  const prPatterns = { selfMerged: 0, reviewed: 0, total: 0, pattern: 'unknown' };
+  try {
+    const prsRes = await get(`${base}/pulls?state=closed&sort=updated&direction=desc&per_page=20`);
+    const prs = (prsRes.data || []).filter(p => p.merged_at);
+
+    for (const pr of prs.slice(0, 15)) {
+      prPatterns.total++;
+      if (pr.user?.login === pr.merged_by?.login) {
+        prPatterns.selfMerged++;
+      } else {
+        prPatterns.reviewed++;
+      }
+    }
+
+    if (prPatterns.total >= 3) {
+      const selfRate = prPatterns.selfMerged / prPatterns.total;
+      if (selfRate > 0.8) {
+        prPatterns.pattern = 'self-merge';
+        if (Object.keys(authors).length > 2) {
+          results.warnings.push('Team project but 80%+ PRs are self-merged — minimal review');
+        }
+      } else if (selfRate < 0.3) {
+        prPatterns.pattern = 'reviewed';
+      } else {
+        prPatterns.pattern = 'mixed';
+      }
+    }
+  } catch {}
+  results.prPatterns = prPatterns;
+
+  // 20. Copy-paste / template detector
+  if (v) console.error('Detecting copy-paste code...');
+  const copyPaste = { isTemplate: false, templateMatch: null, signals: [] };
+
+  // Check for known Solidity templates (OpenZeppelin, etc.)
+  const solFiles = files.filter(f => /\.sol$/i.test(f));
+  if (solFiles.length > 0) {
+    // Sample a few solidity files for import patterns
+    const sampleFiles = solFiles.slice(0, 5);
+    let ozImports = 0;
+    let totalImports = 0;
+
+    for (const sf of sampleFiles) {
+      try {
+        const content = await getRaw(`https://raw.githubusercontent.com/${owner}/${repo}/${r.default_branch}/${sf}`);
+        if (content) {
+          const imports = (content.match(/import\s+.*?[;"]/g) || []);
+          totalImports += imports.length;
+          ozImports += imports.filter(i => /openzeppelin/i.test(i)).length;
+
+          // Check for exact copy signals
+          if (/SPDX-License-Identifier/i.test(content) && content.length < 500 && imports.length > 2) {
+            copyPaste.signals.push(`${sf} — very short file with many imports (likely wrapper)`);
+          }
+        }
+      } catch {}
+    }
+
+    if (totalImports > 0 && ozImports / totalImports > 0.7) {
+      copyPaste.signals.push(`${Math.round(ozImports/totalImports*100)}% of imports are OpenZeppelin — mostly boilerplate`);
+      if (solFiles.length <= 5) {
+        copyPaste.isTemplate = true;
+        copyPaste.templateMatch = 'OpenZeppelin boilerplate';
+      }
+    }
+  }
+
+  // Check for cookie-cutter repo signals
+  if (readmeContent) {
+    // Template README patterns
+    const templatePhrases = [
+      /this project was bootstrapped with/i,
+      /created with create-react-app/i,
+      /built with hardhat/i,
+      /generated by/i,
+      /forked from/i,
+      /starter template/i,
+    ];
+    for (const tp of templatePhrases) {
+      if (tp.test(readmeContent)) {
+        copyPaste.signals.push(`README mentions: "${readmeContent.match(tp)[0]}"`);
+      }
+    }
+  }
+
+  // Extremely low unique code ratio (few code files, lots of config/boilerplate)
+  const codeRatio = codeFiles.length / Math.max(files.length, 1);
+  if (codeRatio < 0.1 && files.length > 20) {
+    copyPaste.signals.push(`Only ${Math.round(codeRatio*100)}% code files — mostly config/boilerplate`);
+  }
+
+  results.copyPaste = copyPaste;
+
+  // 21. Funding/backer verification
+  if (v) console.error('Verifying funding claims...');
+  const backerVerification = { claims: [], verified: [], unverified: [] };
+
+  // Check README for backer/investor claims
+  if (readmeContent) {
+    const backerPatterns = {
+      'a16z': /a16z|andreessen\s*horowitz/i,
+      'Paradigm': /paradigm/i,
+      'Sequoia': /sequoia/i,
+      'Polychain': /polychain/i,
+      'Multicoin': /multicoin/i,
+      'Binance Labs': /binance\s*labs/i,
+      'Coinbase Ventures': /coinbase\s*ventures/i,
+      'Framework Ventures': /framework\s*ventures/i,
+      'Pantera': /pantera/i,
+      'Jump Crypto': /jump\s*(crypto|trading)/i,
+      'Dragonfly': /dragonfly/i,
+      'Galaxy Digital': /galaxy\s*digital/i,
+      'Electric Capital': /electric\s*capital/i,
+      'Solana Foundation': /solana\s*(foundation|ventures)/i,
+      'Ethereum Foundation': /ethereum\s*foundation/i,
+      'Google': /backed by google|google ventures|google cloud partner/i,
+      'Microsoft': /backed by microsoft|microsoft partner/i,
+    };
+
+    // Map backers to known GitHub orgs for cross-reference
+    const backerOrgs = {
+      'a16z': ['a16z', 'a16z-infra'],
+      'Paradigm': ['paradigmxyz'],
+      'Solana Foundation': ['solana-labs', 'solana-foundation'],
+      'Ethereum Foundation': ['ethereum'],
+      'Coinbase Ventures': ['coinbase'],
+      'Binance Labs': ['binance', 'bnb-chain'],
+    };
+
+    for (const [name, pattern] of Object.entries(backerPatterns)) {
+      if (pattern.test(readmeContent)) {
+        backerVerification.claims.push(name);
+
+        // Try to verify: check if any committers are in the backer's org
+        let foundOrgLink = false;
+        if (backerOrgs[name]) {
+          for (const av of authorVerification) {
+            if (!av.githubUser) continue;
+            try {
+              const orgsRes = await get(`https://api.github.com/users/${av.githubUser}/orgs`);
+              const userOrgs = (orgsRes.data || []).map(o => o.login.toLowerCase());
+              if (backerOrgs[name].some(bo => userOrgs.includes(bo.toLowerCase()))) {
+                foundOrgLink = true;
+                backerVerification.verified.push(`${name} — committer @${av.githubUser} is in their org`);
+                break;
+              }
+            } catch {}
+          }
+        }
+
+        if (!foundOrgLink) {
+          backerVerification.unverified.push(`${name} — claimed in README but no committer linked to their org`);
+        }
+      }
+    }
+  }
+
+  results.backerVerification = backerVerification;
+
   // --- SCORING ---
   const scores = {};
 
@@ -879,9 +1180,39 @@ async function analyzeRepo(owner, repo) {
   // Maintainability (0-10)
   scores.maintainability = maintainability.score;
 
+  // Project health (0-10) — abandoned/stale detection + issue response + PR patterns
+  let healthScore = 5;
+  if (projectStatus === 'active') healthScore += 2;
+  else if (projectStatus === 'stale') healthScore -= 2;
+  else if (projectStatus === 'abandoned') healthScore -= 4;
+  else if (projectStatus === 'archived') healthScore -= 3;
+  if (projectStatus === 'neglected') healthScore -= 1;
+
+  if (issueResponse.respondedPct !== null) {
+    if (issueResponse.respondedPct >= 80) healthScore += 1;
+    else if (issueResponse.respondedPct < 30) healthScore -= 1;
+  }
+  if (prPatterns.pattern === 'reviewed') healthScore += 1;
+  else if (prPatterns.pattern === 'self-merge' && Object.keys(authors).length > 2) healthScore -= 1;
+
+  if (velocityTrend.trend === 'accelerating') healthScore += 1;
+  else if (velocityTrend.trend === 'declining') healthScore -= 1;
+
+  scores.projectHealth = Math.max(0, Math.min(10, healthScore));
+
+  // Originality (0-5) — copy-paste, fork quality, license
+  let origScore = 3;
+  if (copyPaste.isTemplate) origScore -= 2;
+  if (copyPaste.signals.length > 2) origScore -= 1;
+  if (forkAnalysis.isFork && forkAnalysis.quality === 'zero-change') origScore -= 2;
+  if (licenseRisk.risk === 'high' && !licenseRisk.license) origScore -= 1;
+  if (backerVerification.unverified.length > 0) origScore -= 1;
+  if (backerVerification.verified.length > 0) origScore += 1;
+  scores.originality = Math.max(0, Math.min(5, origScore));
+
   // Total (normalize to 100)
   const rawTotal = Object.values(scores).reduce((a, b) => a + b, 0) - secDeduction;
-  const maxPossible = 120; // 20+15+25+15+10+10+5+10+10
+  const maxPossible = 135; // 20+15+25+15+10+10+5+10+10+10+5
   results.trustScore = Math.max(0, Math.min(100, Math.round(rawTotal / maxPossible * 100)));
   results.scores = scores;
 
@@ -919,8 +1250,10 @@ function printReport(r) {
     cryptoRisk: 'Crypto Safety',
     readmeQuality: 'README Quality',
     maintainability: 'Maintainability',
+    projectHealth: 'Project Health',
+    originality: 'Originality',
   };
-  const maxes = { commits: 20, contributors: 15, codeQuality: 25, aiAuthenticity: 15, social: 10, activity: 10, cryptoRisk: 5, readmeQuality: 10, maintainability: 10 };
+  const maxes = { commits: 20, contributors: 15, codeQuality: 25, aiAuthenticity: 15, social: 10, activity: 10, cryptoRisk: 5, readmeQuality: 10, maintainability: 10, projectHealth: 10, originality: 5 };
   
   for (const [key, label] of Object.entries(labels)) {
     const score = r.scores[key];
@@ -1038,6 +1371,52 @@ function printReport(r) {
     console.log(`\n  README QUALITY (${r.readmeQuality.score}/${r.readmeQuality.maxScore}):`);
     console.log(`    ${checks.map(([name, has]) => `${has ? '+' : '-'}${name}`).join('  ')}`);
     console.log(`    ${rq.wordCount} words, ${rq.headingCount} headings, ${rq.codeBlockCount} code blocks`);
+  }
+
+  // Project health
+  if (r.projectStatus) {
+    const ps = r.projectStatus;
+    const statusEmoji = { active: '🟢', stale: '🟡', neglected: '🟡', abandoned: '🔴', archived: '⚪' };
+    let healthLine = `${statusEmoji[ps.status] || '⚪'} ${ps.status.toUpperCase()}`;
+    if (ps.daysSincePush > 0) healthLine += ` (last push ${ps.daysSincePush}d ago)`;
+    const extras = [];
+    if (r.velocityTrend?.trend && r.velocityTrend.trend !== 'unknown') extras.push(`velocity: ${r.velocityTrend.trend}`);
+    if (r.issueResponse?.avgResponseHrs !== null) extras.push(`avg issue close: ${r.issueResponse.avgResponseHrs}h`);
+    if (r.prPatterns?.pattern !== 'unknown') extras.push(`PRs: ${r.prPatterns.pattern}${r.prPatterns.total > 0 ? ` (${r.prPatterns.selfMerged}/${r.prPatterns.total} self-merged)` : ''}`);
+    if (extras.length > 0) healthLine += ` | ${extras.join(' | ')}`;
+    if (ps.signals.length > 0) healthLine += `\n    ⚠️ ${ps.signals.join(', ')}`;
+    console.log(`\n  PROJECT HEALTH:`);
+    console.log(`    ${healthLine}`);
+  }
+
+  // Fork analysis
+  if (r.forkAnalysis?.isFork) {
+    console.log(`\n  FORK:`);
+    console.log(`    Forked from ${r.forkAnalysis.parent} (${r.forkAnalysis.parentStars || '?'}⭐)`);
+    if (r.forkAnalysis.aheadBy !== undefined) {
+      console.log(`    ${r.forkAnalysis.aheadBy} commits ahead, ${r.forkAnalysis.behindBy} behind — ${r.forkAnalysis.quality || 'unknown'}`);
+    }
+  }
+
+  // License risk
+  if (r.licenseRisk) {
+    const lr = r.licenseRisk;
+    const riskEmoji = { low: '🟢', medium: '🟡', high: '🔴', unknown: '⚪' };
+    console.log(`\n  LICENSE: ${riskEmoji[lr.risk]} ${lr.details}`);
+  }
+
+  // Copy-paste detection
+  if (r.copyPaste?.signals?.length > 0) {
+    console.log(`\n  ORIGINALITY:`);
+    if (r.copyPaste.isTemplate) console.log(`    🚩 Detected as ${r.copyPaste.templateMatch}`);
+    for (const s of r.copyPaste.signals) console.log(`    - ${s}`);
+  }
+
+  // Backer verification
+  if (r.backerVerification?.claims?.length > 0) {
+    console.log(`\n  BACKER CLAIMS:`);
+    for (const v of r.backerVerification.verified) console.log(`    ✓ ${v}`);
+    for (const u of r.backerVerification.unverified) console.log(`    ✗ ${u}`);
   }
 
   // Flags
