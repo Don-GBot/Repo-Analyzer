@@ -1,55 +1,68 @@
 # Scoring Methodology
 
-## Overview
+## Categories (150 points, normalized to 100)
 
-The trust score is a weighted composite of 7 categories, totaling 100 points maximum.
+| Category | Max Points | What It Measures |
+|----------|-----------|------------------|
+| Commit Health | 20 | Real development activity, GPG signing, code dumps |
+| Contributors | 15 | Team diversity, bus factor, suspicious accounts |
+| Code Quality | 25 | Tests, CI, license, docs, lock files, dependencies |
+| AI Authenticity | 15 | Generated content detection, slop patterns |
+| Social Signals | 10 | Stars, forks, star/fork ratio, botted stars |
+| Activity | 10 | Recent pushes, releases |
+| Crypto Safety | 5 | Token mints, rug patterns, wallet addresses |
+| README Quality | 10 | Install guide, examples, structure, API docs |
+| Maintainability | 10 | File sizes, nesting, code/doc ratio |
+| Project Health | 10 | Abandoned detection, velocity, issue response, PR review |
+| Originality | 5 | Copy-paste, fork quality, backer verification |
+| Agent Safety | 15 | Install hooks, prompt injection, credential harvesting, secrets, CI security |
 
-## Categories
+## Grade Thresholds
 
-### Commit Health (0-20 points)
-- Base: 10
-- +3/2/1 for 50+/20+/10+ human commits
-- +5 for 90%+ GPG signing, +3 for 50%+ GPG signing
-- -5 for code dump (≤3 commits, <30 days old)
-- -4 for evenly-spaced commits (possible fake history)
-- -2 for unusually high commit frequency
+| Grade | Score Range | Interpretation |
+|-------|------------|----------------|
+| A | 85-100 | Legit — well-maintained, real development, trustworthy |
+| B | 70-84 | Solid — good signs overall, minor gaps |
+| C | 55-69 | Mixed — some concerns, do more research |
+| D | 40-54 | Sketchy — multiple red flags |
+| F | 0-39 | Avoid — major red flags, high probability of scam/fake/abandoned |
 
-### Contributors (0-15 points)
-- Base: 5
-- +4 for 5+ contributors, +2 for 2+
-- +3 for bus factor ≥ 2
-- -4 for suspicious accounts (fresh, low repo count)
+## Analysis Modules (29 total)
 
-### Code Quality (0-25 points)
-- Base: 5
-- +4 tests, +3 CI/CD, +2 license, +2 README, +1 .gitignore
-- +2 lock file, +2 docs, +1 contributing, +1 changelog, +1 security policy
-- -3 for very few files (<5)
+1. Repository metadata
+2. Commit analysis (human vs bot, frequency, code dumps, faked timestamps)
+3. Contributor analysis (diversity, bus factor, suspicious accounts)
+4. Activity and health (push frequency, issues, releases)
+5. Code quality signals (tests, CI, license, gitignore, lock files, docs)
+6. Social signals (star/fork ratio, botted stars)
+7. Crypto-specific checks (pump.fun, wallet addresses, placeholder contracts)
+8. Dependency analysis (supply chain, typosquatting, unpinned versions)
+9. Author identity verification (email-to-GitHub matching, GPG, corporate claims)
+10. Author reputation (org memberships, suspicious repos, account age)
+11. README quality (install guide, examples, structure, headings)
+12. Maintainability estimate (file sizes, nesting depth, code/doc ratio)
+13. Plugin/package format detection (OpenClaw, npm, GitHub Actions, Docker, Python)
+14. License risk scoring (permissive vs copyleft vs none)
+15. Abandoned project detection (stale, neglected, archived, unanswered issues)
+16. Fork quality check (divergence from parent)
+17. Commit velocity trends (accelerating, steady, declining)
+18. Issue response time
+19. PR merge patterns (self-merge vs reviewed)
+20. Copy-paste/template detection (OpenZeppelin boilerplate, cookie-cutter signals)
+21. Funding/backer verification (README claims vs org membership)
+22. Agent safety (install hooks, prompt injection, credential harvesting, obfuscation, mining, shell injection, system paths, SKILL.md audit)
+23. Network behavior mapping (domain categorization)
+24. Secrets detection (regex + entropy analysis)
+25. GitHub Actions audit (pull_request_target, unpinned actions, secrets in run)
+26. Permissions manifest (network, filesystem, env vars, system commands)
+27. Historical security (advisories, known compromised packages)
+28. Dependency tree depth (transitive deps, bloat detection)
+29. Code complexity hotspots (large files, nesting, conditional density)
 
-### AI Authenticity (0-15 points)
-- Base: 15
-- -2 per AI slop pattern detected (max -8)
-- -3 for high emoji density
-- -3 for long README + few commits
+## Deductions
 
-### Social Signals (0-10 points)
-- Base: 5
-- +2 for 100+ stars, +2 for 10+ forks
-- -4 for suspected botted stars
-
-### Activity (0-10 points)
-- Base: 5
-- +3/2/1 for push within 7/30/90 days
-- -3 for no commits in a year
-- +2 for releases
-
-### Crypto Safety (0-5 points)
-- Base: 5
-- -2 per crypto red flag (launchpad mints, placeholder IDs, hardcoded wallets)
-
-## Grades
-- A: 85-100
-- B: 70-84
-- C: 55-69
-- D: 40-54
-- F: 0-39
+- Security flags: -3 per flag (exposed credentials, private keys)
+- Agent Safety critical findings: -5 each (prompt injection, credential exfiltration)
+- Agent Safety warnings: -2 each
+- Dependency issues: -2 each (unpinned, typosquats)
+- Unverified corporate claims: -3 each

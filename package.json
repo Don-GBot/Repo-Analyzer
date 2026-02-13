@@ -1,7 +1,7 @@
 {
   "name": "repo-analyzer",
-  "version": "1.0.0",
-  "description": "Trust scoring for GitHub repos. Spots faked commits, throwaway accounts, and generated READMEs.",
+  "version": "2.0.0",
+  "description": "GitHub repo trust scoring — 29 analysis modules covering code quality, security, project health, and author verification.",
   "main": "analyze.js",
   "scripts": {
     "analyze": "node analyze.js",
@@ -18,5 +18,5 @@
     "type": "git",
     "url": "https://github.com/Don-GBot/Repo-Analyzer"
   },
-  "keywords": ["github", "analyzer", "trust-score", "due-diligence", "security"]
+  "keywords": ["github", "analyzer", "trust-score", "due-diligence", "security", "audit", "openclaw", "agent-safety"]
 }

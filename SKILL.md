@@ -5,7 +5,7 @@ description: GitHub repository trust scoring and due diligence. Use when asked t
 
 # Repo Analyzer
 
-Zero-dependency GitHub trust scorer. Runs 21 analysis modules across 11 scoring categories.
+Zero-dependency GitHub trust scorer. Runs 29 analysis modules across 12 scoring categories.
 
 ## Usage
 
@@ -29,7 +29,7 @@ node scripts/analyze.js --file <repos.txt> [--json]
 Requires `GITHUB_TOKEN` for 5000 req/hr. Without it: 60 req/hr (batch won't work).
 Load with: `source ~/.bashrc` or `export GITHUB_TOKEN="..."`.
 
-## What It Scores (11 categories, 135pts → normalized to 100)
+## Scoring (12 categories, 150pts normalized to 100)
 
 | Category | Max | What it checks |
 |----------|-----|----------------|
@@ -37,13 +37,14 @@ Load with: `source ~/.bashrc` or `export GITHUB_TOKEN="..."`.
 | Contributors | 15 | Bus factor, contributor diversity |
 | Code Quality | 25 | Tests, CI, license, docs, lock files |
 | AI Authenticity | 15 | AI slop detection in code/README |
-| Social | 10 | Stars, forks, watchers |
-| Activity | 10 | Recency, push frequency |
-| Crypto Safety | 5 | Wallet addresses, token contracts, rug patterns |
-| README Quality | 10 | Install guide, examples, structure, docs |
+| Social | 10 | Stars, forks, star/fork ratio, botted stars |
+| Activity | 10 | Recent pushes, releases |
+| Crypto Safety | 5 | Token mints, rug patterns, wallet addresses |
+| README Quality | 10 | Install guide, examples, structure, API docs |
 | Maintainability | 10 | File sizes, nesting, code/doc ratio |
-| Project Health | 10 | Abandoned detection, issue response, PR review, velocity |
-| Originality | 5 | Copy-paste detection, fork quality, backer verification |
+| Project Health | 10 | Abandoned detection, velocity, issue response, PR review |
+| Originality | 5 | Copy-paste, fork quality, backer verification |
+| Agent Safety | 15 | Install hooks, prompt injection, secrets, CI audit, permissions |
 
 ## Grade Scale
 - A (85+): LEGIT
@@ -53,11 +54,14 @@ Load with: `source ~/.bashrc` or `export GITHUB_TOKEN="..."`.
 - F (<40): AVOID
 
 ## Key Features
-- **Author reputation**: Checks committers' other repos, org memberships, account age, suspicious projects
-- **Backer verification**: Cross-references README investor claims against committer org membership
-- **Copy-paste detection**: Identifies OpenZeppelin boilerplate, template repos, zero-change forks
-- **Abandoned detection**: Last push age, unanswered issues, stale PRs
-- **License risk**: Permissive vs copyleft vs none
+- **Agent safety**: Detects prompt injection, credential harvesting, install script hooks, obfuscated code
+- **Secrets detection**: Finds hardcoded API keys, tokens, private keys via regex + entropy
+- **Network mapping**: Categorizes all outbound domains (API, CDN, unknown)
+- **CI/CD audit**: Checks GitHub Actions for pull_request_target, unpinned actions, secret leaks
+- **Permissions manifest**: Summarizes what the code needs to run (like an app permissions list)
+- **Author reputation**: Org memberships, suspicious repos, account age
+- **Backer verification**: Cross-references investor claims vs committer org membership
+- **Complexity hotspots**: Flags large files with deep nesting and high conditional density
 
 ## Batch File Format
 ```
@@ -75,4 +79,4 @@ Default: rich terminal report with bar charts, sections, verdict.
 ## When Reporting to User
 Keep it concise. Lead with score/grade and notable findings. Skip sections with nothing interesting. Example:
 
-"OpenZeppelin scored 91/A — top marks. 100% GPG-signed commits, MIT license, active PRs with review. One committer (@ernestognw) is in the OpenZeppelin org, 8yr account."
+"Uniswap/v3-core scored 75/B — 96% GPG-signed, 11 authors, MIT license. Flagged: abandoned (466 days no push), 2,597 transitive deps (bloated), secrets in CI run commands. Agent safety: CAUTION."
