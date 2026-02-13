@@ -544,6 +544,90 @@ async function analyzeRepo(owner, repo) {
 
   results.authorVerification = authorVerification;
 
+  // 9b. Author reputation deep-dive — only surfaces noteworthy findings
+  if (v) console.error('Checking author reputation...');
+  const authorReputation = [];
+
+  for (const av of authorVerification) {
+    if (!av.githubUser) continue;
+    const notes = [];
+
+    try {
+      // Get their repos (sorted by stars)
+      const reposRes = await get(`https://api.github.com/users/${av.githubUser}/repos?sort=stars&per_page=30&type=owner`);
+      const repos = reposRes.data || [];
+
+      // Account age
+      if (av.createdAt) {
+        const acctAge = (Date.now() - new Date(av.createdAt).getTime()) / (1000 * 60 * 60 * 24 * 365);
+        if (acctAge < 0.5) notes.push(`⚠️ Account <6 months old`);
+        else if (acctAge > 8) notes.push(`Account ${Math.floor(acctAge)}+ years old`);
+      }
+
+      // Follower signal
+      if (av.followers >= 1000) notes.push(`${av.followers.toLocaleString()} followers`);
+      else if (av.followers === 0 && repos.length > 5) notes.push(`⚠️ 0 followers despite ${repos.length} repos`);
+
+      // Notable repos they own
+      const starredRepos = repos.filter(r => r.stargazers_count >= 100);
+      if (starredRepos.length > 0) {
+        const top = starredRepos[0];
+        notes.push(`Maintains ${top.full_name} (${top.stargazers_count.toLocaleString()}⭐)`);
+        if (starredRepos.length > 1) notes.push(`${starredRepos.length} repos with 100+ stars`);
+      }
+
+      // Empty/fork-heavy profile (sketch signal)
+      const forks = repos.filter(r => r.fork);
+      const empty = repos.filter(r => r.size === 0);
+      if (repos.length > 0 && forks.length / repos.length > 0.7) {
+        notes.push(`⚠️ ${Math.round(forks.length/repos.length*100)}% of repos are forks`);
+      }
+      if (empty.length > repos.length * 0.5 && repos.length > 3) {
+        notes.push(`⚠️ ${empty.length}/${repos.length} repos are empty`);
+      }
+
+      // Crypto-specific checks on their other repos
+      const scamSignals = ['pump', 'honeypot', 'rug', 'drainer', 'sandwich', 'frontrun', 'flashloan-attack', 'mev-bot'];
+      for (const repo of repos) {
+        const name = (repo.name + ' ' + (repo.description || '')).toLowerCase();
+        if (scamSignals.some(s => name.includes(s))) {
+          notes.push(`🚩 Owns suspicious repo: ${repo.full_name} — "${repo.description || repo.name}"`);
+        }
+      }
+
+      // Check orgs they belong to
+      const orgsRes = await get(`https://api.github.com/users/${av.githubUser}/orgs`);
+      const orgs = (orgsRes.data || []).map(o => o.login);
+      const notableOrgs = {
+        'google': 'Google', 'microsoft': 'Microsoft', 'facebook': 'Meta', 'meta': 'Meta',
+        'apple': 'Apple', 'ethereum': 'Ethereum Foundation', 'solana-labs': 'Solana Labs',
+        'paradigmxyz': 'Paradigm', 'a16z': 'a16z', 'OpenZeppelin': 'OpenZeppelin',
+        'foundry-rs': 'Foundry', 'uniswap': 'Uniswap', 'aave': 'Aave',
+        'coinbase': 'Coinbase', 'binance': 'Binance', 'consensys': 'ConsenSys',
+        'chainlink': 'Chainlink', 'MakerDAO': 'MakerDAO', 'compound-finance': 'Compound',
+        'rust-lang': 'Rust', 'nodejs': 'Node.js', 'vercel': 'Vercel', 'docker': 'Docker',
+      };
+      for (const org of orgs) {
+        if (notableOrgs[org]) {
+          notes.push(`Member of ${notableOrgs[org]} org`);
+        }
+      }
+
+      // Check contribution to big repos (starred repos they've contributed to)
+      const starredRes = await get(`https://api.github.com/users/${av.githubUser}/starred?per_page=5`);
+      // We can't easily check contributions without heavy API use, so org membership + own repos suffices
+
+    } catch (e) {
+      // API failures are non-fatal
+    }
+
+    if (notes.length > 0) {
+      authorReputation.push({ user: av.githubUser, name: av.name || av.profileName, notes });
+    }
+  }
+
+  results.authorReputation = authorReputation;
+
   // 10. Security signals
   const secFlags = [];
   // Check for exposed secrets patterns in file list
@@ -911,6 +995,15 @@ function printReport(r) {
       console.log(`    ${a.name} <${a.email}> — ${status}`);
       if (a.githubUser) console.log(`      GitHub: @${a.githubUser} | Repos: ${a.publicRepos} | Followers: ${a.followers}`);
       for (const f of a.flags) console.log(`      ${f}`);
+    }
+  }
+
+  // Author reputation (noteworthy only)
+  if (r.authorReputation && r.authorReputation.length > 0) {
+    console.log(`\n  AUTHOR REPUTATION:`);
+    for (const a of r.authorReputation) {
+      console.log(`    @${a.user}${a.name ? ` (${a.name})` : ''}:`);
+      for (const n of a.notes) console.log(`      ${n}`);
     }
   }
 
