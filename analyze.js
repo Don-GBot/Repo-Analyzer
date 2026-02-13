@@ -2297,10 +2297,24 @@ async function main() {
     }
     console.error(`Found ${repos.length} repo${repos.length > 1 ? 's' : ''}: ${repos.map(r => `${r.owner}/${r.repo}`).join(', ')}\n`);
 
+    // Print tweet context
+    if (tweetText && !args.json) {
+      console.log(`${'─'.repeat(60)}`);
+      console.log(`  TWEET CONTEXT:`);
+      // Clean up bird CLI output formatting
+      const lines = tweetText.trim().split('\n');
+      for (const line of lines) {
+        console.log(`  ${line}`);
+      }
+      console.log(`${'─'.repeat(60)}`);
+    }
+
+    const allResults = [];
     for (const parsed of repos) {
       try {
         const results = await analyzeRepo(parsed.owner, parsed.repo);
-        if (args.json) console.log(JSON.stringify(results, null, 2));
+        allResults.push(results);
+        if (args.json) { /* output after loop */ }
         else if (args.oneline) {
           const flagStr = results.flags.length > 0 ? ` — ${results.flags.length} flags` : '';
           console.log(`${results.meta.name}: ${results.trustScore}/100 [${results.grade}]${flagStr}`);
@@ -2308,6 +2322,10 @@ async function main() {
       } catch (e) {
         console.error(`Error analyzing ${parsed.owner}/${parsed.repo}: ${e.message}`);
       }
+    }
+    if (args.json) {
+      const output = { tweet: { url: input, text: tweetText }, repos: allResults };
+      console.log(JSON.stringify(output, null, 2));
     }
     return;
   }

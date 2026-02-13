@@ -1,6 +1,6 @@
 ---
 name: repo-analyzer
-description: GitHub repository trust scoring and due diligence. Use when asked to analyze, audit, score, or evaluate any GitHub repo — especially for crypto/DeFi project DD, checking if a repo is legit, evaluating code quality, verifying team credibility, or comparing multiple repos. Also handles X/Twitter URLs containing GitHub links — auto-extracts and analyzes repos from tweets. Triggers on phrases like "analyze this repo", "is this legit", "check this GitHub", "trust score", "audit this project", "repo quality", "batch scan repos", "analyze this tweet".
+description: GitHub repository trust scoring and due diligence. Use when asked to analyze, audit, score, or evaluate any GitHub repo — especially for crypto/DeFi project DD, checking if a repo is legit, evaluating code quality, verifying team credibility, or comparing multiple repos. Also handles X/Twitter URLs containing GitHub links — auto-extracts and analyzes repos from tweets. Triggers on phrases like "analyze this repo", "is this legit", "check this GitHub", "trust score", "audit this project", "repo quality", "batch scan repos", "analyze this tweet". ALSO auto-triggers when the user pastes an X/Twitter URL that contains a GitHub link — no explicit "analyze" command needed. When triggered by a tweet, ALWAYS include the tweet text/context above the analysis.
 ---
 
 # Repo Analyzer
