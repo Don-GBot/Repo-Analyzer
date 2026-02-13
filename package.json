@@ -1,0 +1,21 @@
+{
+  "name": "repo-analyzer",
+  "version": "1.0.0",
+  "description": "Trust scoring for GitHub repos. Catches rugs, fakes, and AI slop.",
+  "main": "analyze.js",
+  "scripts": {
+    "analyze": "node analyze.js"
+  },
+  "bin": {
+    "repo-analyzer": "./analyze.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Don-GBot/Repo-Analyzer"
+  },
+  "keywords": ["github", "analyzer", "trust-score", "crypto", "due-diligence", "rug-pull", "ai-detection"]
+}
