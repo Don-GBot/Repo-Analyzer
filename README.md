@@ -107,3 +107,26 @@ Single script using the GitHub REST API. Pulls repo metadata, commit history, co
 ## License
 
 MIT
+
+## Advanced Features
+
+### Author Identity Verification
+Cross-references commit emails against GitHub profiles. Detects:
+- Corporate email claims (e.g., `@venmo.com`) without GPG signatures
+- Commit name vs profile name mismatches
+- GitHub accounts created after first commit (retroactive attribution)
+- Unsigned commits from claimed corporate identities
+
+### Dependency Scanning
+Checks package.json, requirements.txt, and Cargo.toml for:
+- Unpinned versions (`*` or `latest`)
+- Typosquatting (common misspellings of popular packages)
+- Suspicious dependency formats
+
+### One-line Mode
+```bash
+node analyze.js owner/repo --oneline
+# Output: owner/repo: 67/100 [C] — 2 flags
+```
+
+Perfect for bots, scripts, Discord/Telegram integrations.

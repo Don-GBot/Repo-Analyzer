@@ -14,6 +14,7 @@ const { values: args, positionals } = parseArgs({
     'json': { type: 'boolean', default: false },
     'verbose': { type: 'boolean', default: false },
     'token': { type: 'string', default: '' },
+    'oneline': { type: 'boolean', default: false },
   },
   allowPositionals: true,
   strict: false,
@@ -373,7 +374,171 @@ async function analyzeRepo(owner, repo) {
     hasCryptoContent: cryptoFlags.length > 0 || r.topics?.some(t => /crypto|defi|solana|ethereum|web3|nft|token/i.test(t)),
   };
 
-  // 8. Security signals
+  // 8. Dependency analysis
+  if (v) console.error('Scanning dependencies...');
+  const depFlags = [];
+  const depInfo = { totalDeps: 0, directDeps: 0, devDeps: 0, outdated: [], suspicious: [] };
+
+  // Check package.json (Node)
+  try {
+    const pkgContent = await getRaw(`https://raw.githubusercontent.com/${owner}/${repo}/${r.default_branch}/package.json`);
+    if (pkgContent && !pkgContent.includes('404')) {
+      const pkg = JSON.parse(pkgContent);
+      const deps = Object.keys(pkg.dependencies || {});
+      const devDeps = Object.keys(pkg.devDependencies || {});
+      depInfo.directDeps = deps.length;
+      depInfo.devDeps = devDeps.length;
+      depInfo.totalDeps = deps.length + devDeps.length;
+
+      // Check for suspicious/typosquatting patterns
+      const knownSuspicious = /^[a-z]+-[a-z]+s$|^[a-z]{1,3}$/; // overly short names
+      for (const d of deps) {
+        // Check for known malicious patterns
+        if (d.includes('--') || d.includes('..') || /^@[^\/]+\/[^\/]+\//.test(d)) {
+          depFlags.push(`Suspicious dependency format: ${d}`);
+        }
+        // Typosquatting: common packages with slight misspellings
+        const typos = {
+          'lodash': ['lodashs', 'lodash-es-fake', 'l0dash'],
+          'express': ['expres', 'expresss', 'exppress'],
+          'axios': ['axois', 'axio', 'axioss'],
+          'react': ['reakt', 'reactt'],
+        };
+        for (const [real, fakes] of Object.entries(typos)) {
+          if (fakes.includes(d)) depFlags.push(`Possible typosquat: ${d} (did you mean ${real}?)`);
+        }
+      }
+
+      // Check for wildcard versions (security risk)
+      const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+      for (const [name, version] of Object.entries(allDeps)) {
+        if (version === '*' || version === 'latest') {
+          depFlags.push(`Unpinned dependency: ${name}@${version}`);
+        }
+      }
+    }
+  } catch {}
+
+  // Check requirements.txt (Python)
+  try {
+    const reqContent = await getRaw(`https://raw.githubusercontent.com/${owner}/${repo}/${r.default_branch}/requirements.txt`);
+    if (reqContent && !reqContent.includes('404') && reqContent.length < 50000) {
+      const lines = reqContent.split('\n').filter(l => l.trim() && !l.startsWith('#'));
+      depInfo.totalDeps += lines.length;
+      depInfo.directDeps += lines.length;
+      // Check for unpinned
+      for (const l of lines) {
+        const name = l.split(/[=<>!]/)[0].trim();
+        if (name && !l.includes('==') && !l.includes('>=')) {
+          depFlags.push(`Unpinned Python dependency: ${name}`);
+        }
+      }
+    }
+  } catch {}
+
+  // Check Cargo.toml (Rust)
+  try {
+    const cargoContent = await getRaw(`https://raw.githubusercontent.com/${owner}/${repo}/${r.default_branch}/Cargo.toml`);
+    if (cargoContent && !cargoContent.includes('404')) {
+      const depMatches = cargoContent.match(/\[dependencies\]([\s\S]*?)(\[|$)/);
+      if (depMatches) {
+        const depLines = depMatches[1].split('\n').filter(l => l.trim() && !l.startsWith('#'));
+        depInfo.totalDeps += depLines.length;
+        depInfo.directDeps += depLines.length;
+      }
+    }
+  } catch {}
+
+  results.dependencies = { ...depInfo, flags: depFlags };
+
+  // 9. Author identity verification
+  if (v) console.error('Verifying author identities...');
+  const authorVerification = [];
+
+  for (const author of Object.entries(authors).slice(0, 5)) {
+    const [email, data] = author;
+    const verification = { email, name: data.name, verified: false, flags: [] };
+
+    // Check if email domain matches a known company
+    const domain = email.split('@')[1];
+    const corpDomains = {
+      'google.com': 'Google', 'microsoft.com': 'Microsoft', 'apple.com': 'Apple',
+      'amazon.com': 'Amazon', 'amazon.de': 'Amazon', 'meta.com': 'Meta', 'facebook.com': 'Meta',
+      'venmo.com': 'Venmo/PayPal', 'stripe.com': 'Stripe', 'coinbase.com': 'Coinbase',
+      'binance.com': 'Binance', 'kraken.com': 'Kraken',
+    };
+
+    if (corpDomains[domain]) {
+      verification.claimedOrg = corpDomains[domain];
+      verification.flags.push(`Claims ${corpDomains[domain]} affiliation via email — unverified without GPG signature`);
+    }
+
+    // Try to find GitHub user by commit email
+    const searchRes = await get(`https://api.github.com/search/users?q=${encodeURIComponent(email)}+in:email`);
+    if (searchRes.data?.total_count > 0) {
+      const user = searchRes.data.items[0];
+      verification.githubUser = user.login;
+
+      // Check if user's public profile matches claimed identity
+      const profileRes = await get(`https://api.github.com/users/${user.login}`);
+      if (profileRes.data) {
+        const profile = profileRes.data;
+        verification.profileName = profile.name;
+        verification.publicRepos = profile.public_repos;
+        verification.followers = profile.followers;
+        verification.createdAt = profile.created_at;
+        verification.bio = profile.bio;
+        verification.company = profile.company;
+
+        // Cross-reference name
+        if (profile.name && data.name && profile.name.toLowerCase() !== data.name.toLowerCase()) {
+          verification.flags.push(`Commit name "${data.name}" doesn't match profile name "${profile.name}"`);
+        }
+
+        // Cross-reference company claim
+        if (verification.claimedOrg && profile.company) {
+          if (profile.company.toLowerCase().includes(verification.claimedOrg.toLowerCase().split('/')[0])) {
+            verification.verified = true;
+            verification.flags.push(`Company "${profile.company}" matches email domain — likely legit`);
+          }
+        }
+
+        // Account age vs commit age
+        const acctDate = new Date(profile.created_at);
+        const firstCommitDate = data.firstCommit ? new Date(data.firstCommit) : null;
+        if (firstCommitDate && acctDate > firstCommitDate) {
+          verification.flags.push(`GitHub account created AFTER first commit — possible retroactive attribution`);
+        }
+      }
+    } else {
+      // No GitHub user found with this email
+      if (verification.claimedOrg) {
+        verification.flags.push(`No GitHub account found with email ${email} — corporate claim is unverifiable`);
+      }
+      // Check if it's a noreply email
+      if (email.includes('noreply.github.com')) {
+        verification.flags.push('Using GitHub noreply email — identity hidden');
+      }
+    }
+
+    // GPG check for this author's commits
+    const authorCommits = commits.filter(c => c.commit?.author?.email === email);
+    const signedCount = authorCommits.filter(c => c.commit?.verification?.verified).length;
+    verification.gpgSigned = signedCount;
+    verification.gpgTotal = authorCommits.length;
+    if (signedCount === 0 && verification.claimedOrg) {
+      verification.flags.push(`0/${authorCommits.length} commits GPG-signed — anyone could have set this email`);
+    } else if (signedCount > 0) {
+      verification.verified = true;
+      verification.flags.push(`${signedCount}/${authorCommits.length} commits GPG-signed — cryptographically verified`);
+    }
+
+    authorVerification.push(verification);
+  }
+
+  results.authorVerification = authorVerification;
+
+  // 10. Security signals
   const secFlags = [];
   // Check for exposed secrets patterns in file list
   if (files.some(f => /\.env$|credentials|secrets?\./i.test(f) && !/\.example|\.sample|\.template/i.test(f))) {
@@ -456,6 +621,25 @@ async function analyzeRepo(owner, repo) {
   cryptoScore -= Math.min(5, cryptoFlags.length * 2);
   if (cryptoFlags.length > 0) results.flags.push(...cryptoFlags);
   scores.cryptoRisk = Math.max(0, cryptoScore);
+
+  // Dependency health (bonus/penalty, folded into codeQuality)
+  if (depFlags.length > 0) {
+    scores.codeQuality = Math.max(0, scores.codeQuality - Math.min(5, depFlags.length * 2));
+    results.flags.push(...depFlags);
+  }
+
+  // Author verification (bonus/penalty to commits score)
+  const unverifiedCorpClaims = authorVerification.filter(a => a.claimedOrg && !a.verified);
+  if (unverifiedCorpClaims.length > 0) {
+    scores.commits = Math.max(0, scores.commits - unverifiedCorpClaims.length * 3);
+    for (const a of unverifiedCorpClaims) {
+      results.flags.push(`Unverified ${a.claimedOrg} identity: ${a.name} <${a.email}> — no GPG signature`);
+    }
+  }
+  const verifiedAuthors = authorVerification.filter(a => a.verified);
+  if (verifiedAuthors.length > 0) {
+    scores.commits = Math.min(20, scores.commits + verifiedAuthors.length * 2);
+  }
 
   // Security (deductions from total)
   let secDeduction = 0;
@@ -556,6 +740,27 @@ function printReport(r) {
     }
   }
 
+  // Dependencies
+  if (r.dependencies && r.dependencies.totalDeps > 0) {
+    console.log(`\n  DEPENDENCIES:`);
+    console.log(`    Total: ${r.dependencies.totalDeps} (${r.dependencies.directDeps} direct, ${r.dependencies.devDeps} dev)`);
+    if (r.dependencies.flags.length > 0) {
+      for (const f of r.dependencies.flags) console.log(`    ⚠️ ${f}`);
+    }
+  }
+
+  // Author verification
+  if (r.authorVerification && r.authorVerification.some(a => a.flags.length > 0)) {
+    console.log(`\n  AUTHOR VERIFICATION:`);
+    for (const a of r.authorVerification) {
+      if (a.flags.length === 0) continue;
+      const status = a.verified ? '✓ VERIFIED' : '✗ UNVERIFIED';
+      console.log(`    ${a.name} <${a.email}> — ${status}`);
+      if (a.githubUser) console.log(`      GitHub: @${a.githubUser} | Repos: ${a.publicRepos} | Followers: ${a.followers}`);
+      for (const f of a.flags) console.log(`      ${f}`);
+    }
+  }
+
   // Flags
   if (r.flags.length > 0) {
     console.log(`\n  🚩 FLAGS:`);
@@ -597,7 +802,11 @@ async function main() {
 
   try {
     const results = await analyzeRepo(parsed.owner, parsed.repo);
-    if (args.json) {
+    if (args.oneline) {
+      const flagCount = results.flags.length;
+      const flagStr = flagCount > 0 ? ` — ${flagCount} flag${flagCount > 1 ? 's' : ''}` : '';
+      console.log(`${results.meta.name}: ${results.trustScore}/100 [${results.grade}]${flagStr}`);
+    } else if (args.json) {
       console.log(JSON.stringify(results, null, 2));
     } else {
       printReport(results);
