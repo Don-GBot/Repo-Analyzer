@@ -32,13 +32,18 @@ function get(url, headers = {}) {
       'Accept': 'application/vnd.github.v3+json',
       ...headers,
     };
-    if (GITHUB_TOKEN) h['Authorization'] = `token ${GITHUB_TOKEN}`;
+    if (GITHUB_TOKEN) h['Authorization'] = `Bearer ${GITHUB_TOKEN}`;
     
     const u = new URL(url);
     const req = https.request({
       hostname: u.hostname, path: u.pathname + u.search,
       headers: h,
     }, res => {
+      // Follow redirects (301, 302, 307)
+      if ([301, 302, 307].includes(res.statusCode) && res.headers.location) {
+        get(res.headers.location, headers).then(resolve).catch(reject);
+        return;
+      }
       let d = '';
       res.on('data', c => d += c);
       res.on('end', () => {
@@ -103,8 +108,7 @@ async function analyzeRepo(owner, repo) {
   if (v) console.error('Fetching repo metadata...');
   const repoRes = await get(base);
   if (repoRes.status === 404) {
-    console.error(`Repository ${owner}/${repo} not found`);
-    process.exit(1);
+    throw new Error(`Repository ${owner}/${repo} not found`);
   }
   const r = repoRes.data;
   results.meta = {
@@ -999,11 +1003,11 @@ async function batchAnalyze(filePath) {
       results.push(r);
       const flagStr = r.flags.length > 0 ? ` (${r.flags.length} flags)` : '';
       console.log(`  ${r.grade} ${String(r.trustScore).padStart(3)}/100  ${r.meta.name}${flagStr}`);
-      // Small delay to avoid rate limits
-      await new Promise(resolve => setTimeout(resolve, 500));
     } catch (e) {
       console.error(`  ✗ ${parsed.owner}/${parsed.repo}: ${e.message}`);
     }
+    // Delay to avoid rate limits
+    await new Promise(resolve => setTimeout(resolve, 1000));
   }
   
   // Summary
