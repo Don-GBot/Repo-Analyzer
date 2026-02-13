@@ -1260,6 +1260,414 @@ async function analyzeRepo(owner, repo) {
 
   results.agentSafety = agentSafety;
 
+  // 23. Network behavior mapping — map ALL outbound domains
+  if (v) console.error('Mapping network behavior...');
+  const networkMap = { domains: {}, unknown: [], total: 0 };
+  const knownDomainCategories = {
+    'api.github.com': 'API', 'github.com': 'API', 'raw.githubusercontent.com': 'CDN',
+    'registry.npmjs.org': 'Package Registry', 'npmjs.com': 'Package Registry',
+    'pypi.org': 'Package Registry', 'crates.io': 'Package Registry',
+    'rubygems.org': 'Package Registry', 'pkg.go.dev': 'Package Registry',
+    'cdn.jsdelivr.net': 'CDN', 'unpkg.com': 'CDN', 'cdnjs.cloudflare.com': 'CDN',
+    'fonts.googleapis.com': 'CDN', 'fonts.gstatic.com': 'CDN',
+    'google-analytics.com': 'Analytics', 'analytics.google.com': 'Analytics',
+    'sentry.io': 'Error Tracking', 'bugsnag.com': 'Error Tracking',
+    'shields.io': 'Badge', 'img.shields.io': 'Badge', 'badge.fury.io': 'Badge',
+    'coveralls.io': 'CI', 'codecov.io': 'CI', 'travis-ci.org': 'CI', 'circleci.com': 'CI',
+    'readthedocs.org': 'Docs', 'docs.rs': 'Docs',
+    'etherscan.io': 'Blockchain Explorer', 'solscan.io': 'Blockchain Explorer', 'basescan.org': 'Blockchain Explorer', 'bscscan.com': 'Blockchain Explorer', 'polygonscan.com': 'Blockchain Explorer', 'arbiscan.io': 'Blockchain Explorer',
+    'infura.io': 'RPC Provider', 'alchemy.com': 'RPC Provider', 'quicknode.com': 'RPC Provider', 'helius.dev': 'RPC Provider', 'helius-rpc.com': 'RPC Provider',
+    'api.coingecko.com': 'Market Data', 'api.coinmarketcap.com': 'Market Data', 'min-api.cryptocompare.com': 'Market Data', 'api.hyperliquid.xyz': 'Market Data', 'api.binance.com': 'Market Data', 'api.bybit.com': 'Market Data',
+    'reddit.com': 'Social', 'www.reddit.com': 'Social', 'api.twitter.com': 'Social', 'x.com': 'Social',
+    'polymarket.com': 'Prediction Market', 'gamma-api.polymarket.com': 'Prediction Market',
+    'localhost': 'Local', '127.0.0.1': 'Local', '0.0.0.0': 'Local',
+  };
+  const allCodeFiles = files.filter(f => /\.(js|ts|py|sh|rb|go|rs|java|sol|move|toml|json|yaml|yml)$/i.test(f) && !f.includes('node_modules') && !f.includes('vendor'));
+  // Sample up to 20 code files for URL extraction
+  for (const cf of allCodeFiles.slice(0, 20)) {
+    try {
+      const content = await getRaw(`https://raw.githubusercontent.com/${owner}/${repo}/${r.default_branch}/${cf}`);
+      if (!content || content.includes('404: Not Found')) continue;
+      const urls = content.match(/https?:\/\/[^\s'"`)}\]>]+/g) || [];
+      for (const url of urls) {
+        try {
+          const hostname = new URL(url).hostname;
+          networkMap.total++;
+          // Categorize
+          let category = null;
+          for (const [domain, cat] of Object.entries(knownDomainCategories)) {
+            if (hostname === domain || hostname.endsWith('.' + domain)) { category = cat; break; }
+          }
+          if (category) {
+            networkMap.domains[category] = networkMap.domains[category] || new Set();
+            networkMap.domains[category].add(hostname);
+          } else {
+            if (!networkMap.unknown.includes(hostname)) networkMap.unknown.push(hostname);
+          }
+        } catch {}
+      }
+    } catch {}
+  }
+  // Convert sets to arrays for JSON
+  for (const [cat, hosts] of Object.entries(networkMap.domains)) {
+    networkMap.domains[cat] = [...hosts];
+  }
+  if (networkMap.unknown.length > 3) {
+    agentSafety.warning.push(`${networkMap.unknown.length} unknown external domains: ${networkMap.unknown.slice(0, 5).join(', ')}${networkMap.unknown.length > 5 ? '...' : ''}`);
+    // Re-evaluate verdict
+    if (agentSafety.verdict === 'PASS') agentSafety.verdict = 'CAUTION';
+  }
+  results.networkMap = networkMap;
+
+  // 24. Secrets in code — detect hardcoded keys/tokens via regex + entropy
+  if (v) console.error('Scanning for hardcoded secrets...');
+  const secretFindings = [];
+  const secretPatterns = [
+    { pattern: /(?:AKIA|ASIA)[A-Z0-9]{16}/g, name: 'AWS Access Key' },
+    { pattern: /(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,}/g, name: 'GitHub Token' },
+    { pattern: /sk-[A-Za-z0-9]{48,}/g, name: 'OpenAI API Key' },
+    { pattern: /sk_live_[A-Za-z0-9]{24,}/g, name: 'Stripe Secret Key' },
+    { pattern: /xox[bpoas]-[A-Za-z0-9-]+/g, name: 'Slack Token' },
+    { pattern: /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, name: 'JWT Token' },
+    { pattern: /-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----/g, name: 'Private Key (PEM)' },
+    { pattern: /(?:0x)?[a-fA-F0-9]{64}(?![a-fA-F0-9])/g, name: 'Possible private key (64 hex chars)' },
+    { pattern: /SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}/g, name: 'SendGrid API Key' },
+    { pattern: /(?:discord|webhook).*(?:https:\/\/discord(?:app)?\.com\/api\/webhooks\/\d+\/[A-Za-z0-9_-]+)/gi, name: 'Discord Webhook' },
+  ];
+
+  // Only scan non-test, non-example files
+  const secretScanFiles = files.filter(f =>
+    /\.(js|ts|py|sh|rb|go|rs|java|env|cfg|ini|conf|properties)$/i.test(f)
+    && !f.includes('node_modules') && !f.includes('vendor')
+    && !/test|spec|fixture|example|sample|mock|fake|\.example|\.sample/i.test(f)
+  ).slice(0, 15);
+
+  for (const sf of secretScanFiles) {
+    try {
+      const content = await getRaw(`https://raw.githubusercontent.com/${owner}/${repo}/${r.default_branch}/${sf}`);
+      if (!content || content.includes('404: Not Found')) continue;
+
+      for (const { pattern, name } of secretPatterns) {
+        pattern.lastIndex = 0;
+        const matches = content.match(pattern);
+        if (matches) {
+          // Skip obvious examples/placeholders
+          const realMatches = matches.filter(m =>
+            !/xxx|example|placeholder|your[_-]?key|insert|replace|dummy|fake|test|sample|TODO|CHANGEME/i.test(m)
+            && m.length > 10
+          );
+          if (realMatches.length > 0) {
+            const preview = realMatches[0].substring(0, 12) + '...';
+            secretFindings.push({ file: sf, type: name, count: realMatches.length, preview });
+            agentSafety.critical.push(`${sf}: hardcoded ${name} found (${preview})`);
+          }
+        }
+      }
+
+      // Entropy check — find high-entropy strings that look like secrets
+      const highEntropyStrings = [];
+      const stringMatches = content.match(/['"][A-Za-z0-9+\/=_-]{32,}['"]/g) || [];
+      for (const s of stringMatches) {
+        const inner = s.slice(1, -1);
+        // Calculate Shannon entropy
+        const freq = {};
+        for (const c of inner) freq[c] = (freq[c] || 0) + 1;
+        const len = inner.length;
+        let entropy = 0;
+        for (const count of Object.values(freq)) {
+          const p = count / len;
+          entropy -= p * Math.log2(p);
+        }
+        // High entropy (>4.5) + long (>32 chars) = likely a secret
+        if (entropy > 4.5 && inner.length >= 32) {
+          // Exclude known non-secrets (hashes in lock files, base64 encoded normal strings)
+          if (!/sha256|sha512|integrity|hash|digest|checksum/i.test(content.substring(Math.max(0, content.indexOf(inner) - 50), content.indexOf(inner)))) {
+            highEntropyStrings.push(inner.substring(0, 12) + '...');
+          }
+        }
+      }
+      if (highEntropyStrings.length > 0) {
+        secretFindings.push({ file: sf, type: 'High-entropy string', count: highEntropyStrings.length, preview: highEntropyStrings[0] });
+        if (highEntropyStrings.length >= 3) {
+          agentSafety.warning.push(`${sf}: ${highEntropyStrings.length} high-entropy strings — possible hardcoded secrets`);
+        }
+      }
+    } catch {}
+  }
+  results.secretFindings = secretFindings;
+
+  // 25. GitHub Actions audit — check CI workflow security
+  if (v) console.error('Auditing GitHub Actions...');
+  const actionsAudit = { workflows: 0, findings: [] };
+  const workflowFiles = files.filter(f => /\.github\/workflows\/.*\.(yml|yaml)$/i.test(f));
+  actionsAudit.workflows = workflowFiles.length;
+
+  for (const wf of workflowFiles.slice(0, 5)) {
+    try {
+      const content = await getRaw(`https://raw.githubusercontent.com/${owner}/${repo}/${r.default_branch}/${wf}`);
+      if (!content || content.includes('404: Not Found')) continue;
+
+      // pull_request_target — allows fork PRs to access secrets
+      if (/pull_request_target/i.test(content)) {
+        actionsAudit.findings.push({ file: wf, issue: 'Uses pull_request_target — fork PRs can access repo secrets', severity: 'critical' });
+        agentSafety.critical.push(`${wf}: pull_request_target trigger — fork PRs access secrets`);
+      }
+
+      // Third-party actions not pinned to SHA
+      const usesLines = content.match(/uses:\s*[^\n]+/g) || [];
+      for (const line of usesLines) {
+        const action = line.replace('uses:', '').trim();
+        // Skip official actions
+        if (/^actions\/|^github\//i.test(action)) continue;
+        // Check if pinned to SHA (40 hex chars after @)
+        if (/@[a-f0-9]{40}/i.test(action)) continue;
+        // Using @main, @master, or @v* tag (not SHA)
+        if (/@(main|master|v\d)/i.test(action)) {
+          actionsAudit.findings.push({ file: wf, issue: `Unpinned action: ${action} — vulnerable to tag hijack`, severity: 'warning' });
+        }
+      }
+
+      // Secrets passed to potentially untrusted contexts
+      if (/\$\{\{\s*secrets\./i.test(content) && /run:/i.test(content)) {
+        // Check if secrets are used in run commands (vs just with: blocks)
+        const lines = content.split('\n');
+        let inRun = false;
+        for (const line of lines) {
+          if (/^\s*run:/i.test(line)) inRun = true;
+          else if (/^\s*\w+:/i.test(line) && !/^\s*\|/.test(line)) inRun = false;
+          if (inRun && /\$\{\{\s*secrets\./i.test(line)) {
+            actionsAudit.findings.push({ file: wf, issue: 'Secrets interpolated in shell run command — injection risk if inputs are untrusted', severity: 'warning' });
+            break;
+          }
+        }
+      }
+
+      // workflow_dispatch without branch protection check
+      if (/workflow_dispatch/i.test(content)) {
+        actionsAudit.findings.push({ file: wf, issue: 'Manual trigger (workflow_dispatch) enabled', severity: 'info' });
+      }
+
+      // Dangerous permissions
+      if (/permissions:\s*write-all|permissions:\s*\n\s*contents:\s*write/i.test(content)) {
+        actionsAudit.findings.push({ file: wf, issue: 'Workflow has write permissions to repo contents', severity: 'warning' });
+      }
+    } catch {}
+  }
+
+  // Aggregate action warnings into agent safety
+  const actionWarnings = actionsAudit.findings.filter(f => f.severity === 'warning');
+  if (actionWarnings.length > 2) {
+    agentSafety.warning.push(`GitHub Actions: ${actionWarnings.length} security concerns across ${workflowFiles.length} workflows`);
+  }
+  results.actionsAudit = actionsAudit;
+
+  // 26. Permissions manifest — summarize what the repo needs to function
+  if (v) console.error('Building permissions manifest...');
+  const permissions = { network: false, fileWrite: false, fileRead: false, envVars: [], systemCommands: false, crypto: false, details: [] };
+
+  // Aggregate from previous scans
+  if (networkMap.total > 0) {
+    permissions.network = true;
+    const cats = Object.keys(networkMap.domains);
+    permissions.details.push(`Network: ${cats.join(', ')}${networkMap.unknown.length > 0 ? ` + ${networkMap.unknown.length} unknown` : ''}`);
+  }
+
+  // Scan for file system operations
+  const fsPatterns = /fs\.(write|mkdir|appendFile|createWriteStream)|open\(.*['"]w|writeFile|fwrite|file_put_contents|with open.*['"]w/i;
+  const fsReadPatterns = /fs\.(read|readFile|createReadStream|readdir)|open\(.*['"]r|fread|file_get_contents|with open.*['"]r/i;
+  const execPatterns = /child_process|exec\(|execSync|spawn|subprocess|os\.system|Popen|Process\./i;
+  const envPatterns = /process\.env\.(\w+)|os\.environ\[['"](\w+)['"]\]|ENV\[['"](\w+)['"]\]|getenv\(['"](\w+)['"]\)/g;
+
+  const manifestScanFiles = files.filter(f =>
+    /\.(js|ts|py|sh|rb|go|rs)$/i.test(f) && !f.includes('node_modules') && !f.includes('vendor') && !/test|spec/i.test(f)
+  ).slice(0, 15);
+
+  const envVarSet = new Set();
+  for (const mf of manifestScanFiles) {
+    try {
+      const content = await getRaw(`https://raw.githubusercontent.com/${owner}/${repo}/${r.default_branch}/${mf}`);
+      if (!content || content.includes('404: Not Found')) continue;
+
+      if (fsPatterns.test(content)) permissions.fileWrite = true;
+      if (fsReadPatterns.test(content)) permissions.fileRead = true;
+      if (execPatterns.test(content)) {
+        permissions.systemCommands = true;
+        permissions.details.push(`System commands: ${mf}`);
+      }
+
+      // Extract env var names
+      let envMatch;
+      const envRegex = /process\.env\.(\w+)|os\.environ\[['"](\w+)['"]\]|os\.environ\.get\(['"](\w+)['"]\)/g;
+      while ((envMatch = envRegex.exec(content)) !== null) {
+        const varName = envMatch[1] || envMatch[2] || envMatch[3];
+        if (varName && varName.length > 1 && varName !== 'NODE_ENV' && varName !== 'PATH') {
+          envVarSet.add(varName);
+        }
+      }
+
+      // Crypto operations
+      if (/crypto\.|hashlib|bcrypt|argon2|createSign|createVerify|ethers|web3|solana|@solana/i.test(content)) {
+        permissions.crypto = true;
+      }
+    } catch {}
+  }
+  permissions.envVars = [...envVarSet].sort();
+  if (permissions.envVars.length > 0) {
+    permissions.details.push(`Env vars: ${permissions.envVars.join(', ')}`);
+  }
+  if (permissions.fileWrite) permissions.details.push('File system: write');
+  if (permissions.fileRead) permissions.details.push('File system: read');
+  if (permissions.crypto) permissions.details.push('Cryptographic operations');
+  results.permissions = permissions;
+
+  // 27. Historical security — check for advisories and known vulnerabilities
+  if (v) console.error('Checking security history...');
+  const securityHistory = { advisories: [], dependabotAlerts: false, hasSecurityPolicy: false };
+
+  // Check for security advisories via API
+  try {
+    const advisoriesRes = await get(`${base}/security-advisories?per_page=10`);
+    if (Array.isArray(advisoriesRes.data)) {
+      securityHistory.advisories = advisoriesRes.data.map(a => ({
+        severity: a.severity,
+        summary: a.summary,
+        cve: a.cve_id,
+        published: a.published_at,
+        state: a.state,
+      }));
+    }
+  } catch {}
+
+  // Check for SECURITY.md
+  securityHistory.hasSecurityPolicy = files.some(f => /^security\.md$/i.test(f.split('/').pop()));
+
+  // Check if Dependabot is configured
+  securityHistory.dependabotAlerts = files.some(f => /\.github\/dependabot\.yml/i.test(f));
+
+  // Check for known vulnerable dependencies (basic check against package names)
+  const knownVulnerable = {
+    'event-stream': 'Compromised in 2018 — cryptocurrency theft',
+    'ua-parser-js': 'Compromised in 2021 — crypto miner injection',
+    'coa': 'Compromised in 2021 — malicious code',
+    'rc': 'Compromised in 2021 — malicious code',
+    'colors': 'Sabotaged by maintainer in 2022',
+    'faker': 'Sabotaged by maintainer in 2022',
+    'node-ipc': 'Protestware in 2022 — destructive on Russian IPs',
+    'peacenotwar': 'Protestware dependency',
+  };
+
+  try {
+    const pkgContent4 = await getRaw(`https://raw.githubusercontent.com/${owner}/${repo}/${r.default_branch}/package.json`);
+    if (pkgContent4 && !pkgContent4.includes('404')) {
+      const pkg4 = JSON.parse(pkgContent4);
+      const allDeps4 = { ...pkg4.dependencies, ...pkg4.devDependencies };
+      for (const [name, reason] of Object.entries(knownVulnerable)) {
+        if (allDeps4[name]) {
+          securityHistory.advisories.push({ severity: 'critical', summary: `Known compromised package: ${name} — ${reason}`, cve: null });
+          agentSafety.critical.push(`Depends on known compromised package: ${name} — ${reason}`);
+        }
+      }
+    }
+  } catch {}
+
+  if (securityHistory.advisories.length > 0) {
+    const criticals = securityHistory.advisories.filter(a => a.severity === 'critical' || a.severity === 'high');
+    if (criticals.length > 0) {
+      agentSafety.warning.push(`${criticals.length} critical/high security advisories on record`);
+    }
+  }
+  results.securityHistory = securityHistory;
+
+  // 28. Dependency tree depth — check for bloated transitive deps
+  if (v) console.error('Checking dependency tree depth...');
+  const depTreeInfo = { hasLockFile: false, estimatedTransitive: null, bloated: false };
+
+  // Check package-lock.json for dependency count
+  if (files.some(f => f === 'package-lock.json')) {
+    depTreeInfo.hasLockFile = true;
+    try {
+      // package-lock.json can be huge, just check its size from tree
+      const lockEntry = (treeRes.data?.tree || []).find(t => t.path === 'package-lock.json');
+      if (lockEntry) {
+        // Rough estimate: each dep entry is ~200 bytes in package-lock
+        depTreeInfo.estimatedTransitive = Math.round(lockEntry.size / 200);
+        if (depTreeInfo.estimatedTransitive > 500) {
+          depTreeInfo.bloated = true;
+          agentSafety.warning.push(`Estimated ${depTreeInfo.estimatedTransitive}+ transitive dependencies — large attack surface`);
+        }
+      }
+    } catch {}
+  } else if (files.some(f => f === 'yarn.lock')) {
+    depTreeInfo.hasLockFile = true;
+    try {
+      const lockEntry = (treeRes.data?.tree || []).find(t => t.path === 'yarn.lock');
+      if (lockEntry) {
+        depTreeInfo.estimatedTransitive = Math.round(lockEntry.size / 150);
+        if (depTreeInfo.estimatedTransitive > 500) {
+          depTreeInfo.bloated = true;
+          agentSafety.warning.push(`Estimated ${depTreeInfo.estimatedTransitive}+ transitive dependencies — large attack surface`);
+        }
+      }
+    } catch {}
+  }
+  results.depTreeInfo = depTreeInfo;
+
+  // 29. Code complexity hotspots — find files likely to harbor bugs
+  if (v) console.error('Finding complexity hotspots...');
+  const complexityHotspots = [];
+
+  // Check file sizes from tree — large files correlate with complexity
+  const codeTreeEntries = (treeRes.data?.tree || []).filter(t => {
+    if (t.type !== 'blob') return false;
+    const ext = t.path.split('.').pop()?.toLowerCase();
+    return ['js', 'ts', 'py', 'rb', 'go', 'rs', 'java', 'c', 'cpp', 'sol'].includes(ext);
+  });
+
+  // Flag files over 20KB (likely complex)
+  const largeCodeFiles = codeTreeEntries.filter(t => t.size > 20000).sort((a, b) => b.size - a.size);
+  for (const lcf of largeCodeFiles.slice(0, 5)) {
+    const hotspot = { file: lcf.path, sizeKB: Math.round(lcf.size / 1024), indicators: ['large file'] };
+
+    // Sample the file for complexity indicators
+    try {
+      const content = await getRaw(`https://raw.githubusercontent.com/${owner}/${repo}/${r.default_branch}/${lcf.path}`);
+      if (content && !content.includes('404: Not Found')) {
+        const lines = content.split('\n');
+        hotspot.lines = lines.length;
+
+        // Nesting depth — count max indentation
+        let maxIndent = 0;
+        for (const line of lines) {
+          const indent = line.match(/^(\s*)/)?.[1].length || 0;
+          const indentLevel = Math.floor(indent / 2);
+          if (indentLevel > maxIndent) maxIndent = indentLevel;
+        }
+        if (maxIndent > 8) hotspot.indicators.push(`deep nesting (${maxIndent} levels)`);
+
+        // Function count
+        const funcCount = (content.match(/function\s+\w+|=>\s*{|def\s+\w+|fn\s+\w+|func\s+\w+/g) || []).length;
+        if (funcCount > 30) hotspot.indicators.push(`${funcCount} functions`);
+
+        // Conditional density
+        const conditionals = (content.match(/\bif\b|\belse\b|\bswitch\b|\bcase\b|\?\s*:/g) || []).length;
+        const condDensity = conditionals / Math.max(lines.length, 1) * 100;
+        if (condDensity > 10) hotspot.indicators.push(`high conditional density (${Math.round(condDensity)}%)`);
+
+        // TODO/FIXME/HACK comments
+        const todos = (content.match(/TODO|FIXME|HACK|XXX|BROKEN/g) || []).length;
+        if (todos > 3) hotspot.indicators.push(`${todos} TODO/FIXME comments`);
+      }
+    } catch {}
+
+    complexityHotspots.push(hotspot);
+  }
+  results.complexityHotspots = complexityHotspots;
+
+  // Re-evaluate agentSafety verdict after all new modules
+  if (agentSafety.critical.length > 0) agentSafety.verdict = 'FAIL';
+  else if (agentSafety.warning.length > 0) agentSafety.verdict = 'CAUTION';
+  else agentSafety.verdict = 'PASS';
+
   // --- SCORING ---
   const scores = {};
 
@@ -1603,6 +2011,73 @@ function printReport(r) {
     console.log(`\n  BACKER CLAIMS:`);
     for (const v of r.backerVerification.verified) console.log(`    ✓ ${v}`);
     for (const u of r.backerVerification.unverified) console.log(`    ✗ ${u}`);
+  }
+
+  // Network map
+  if (r.networkMap && (Object.keys(r.networkMap.domains).length > 0 || r.networkMap.unknown.length > 0)) {
+    console.log(`\n  NETWORK BEHAVIOR:`);
+    for (const [cat, hosts] of Object.entries(r.networkMap.domains)) {
+      console.log(`    ${cat}: ${hosts.join(', ')}`);
+    }
+    if (r.networkMap.unknown.length > 0) {
+      console.log(`    ⚠️ Unknown: ${r.networkMap.unknown.join(', ')}`);
+    }
+  }
+
+  // Secrets
+  if (r.secretFindings && r.secretFindings.length > 0) {
+    console.log(`\n  🔑 HARDCODED SECRETS:`);
+    for (const s of r.secretFindings) {
+      console.log(`    ${s.file}: ${s.type} (${s.preview})`);
+    }
+  }
+
+  // Actions audit
+  if (r.actionsAudit && r.actionsAudit.findings.length > 0) {
+    console.log(`\n  CI/CD SECURITY (${r.actionsAudit.workflows} workflows):`);
+    for (const f of r.actionsAudit.findings) {
+      const icon = f.severity === 'critical' ? '🔴' : f.severity === 'warning' ? '🟡' : 'ℹ️';
+      console.log(`    ${icon} ${f.file}: ${f.issue}`);
+    }
+  }
+
+  // Permissions manifest
+  if (r.permissions) {
+    console.log(`\n  PERMISSIONS MANIFEST:`);
+    if (r.permissions.details.length > 0) {
+      for (const d of r.permissions.details) console.log(`    ${d}`);
+    } else {
+      console.log('    Minimal permissions — no network, file writes, or system commands detected');
+    }
+  }
+
+  // Security history
+  if (r.securityHistory?.advisories?.length > 0) {
+    console.log(`\n  SECURITY HISTORY:`);
+    for (const a of r.securityHistory.advisories.slice(0, 5)) {
+      const sev = a.severity?.toUpperCase() || 'UNKNOWN';
+      console.log(`    [${sev}] ${a.summary}${a.cve ? ` (${a.cve})` : ''}`);
+    }
+  }
+  if (r.securityHistory?.hasSecurityPolicy) {
+    console.log(`    ✓ Has SECURITY.md policy`);
+  }
+  if (r.securityHistory?.dependabotAlerts) {
+    console.log(`    ✓ Dependabot configured`);
+  }
+
+  // Dependency tree
+  if (r.depTreeInfo?.estimatedTransitive) {
+    console.log(`\n  DEPENDENCY TREE:`);
+    console.log(`    Estimated transitive deps: ~${r.depTreeInfo.estimatedTransitive}${r.depTreeInfo.bloated ? ' ⚠️ BLOATED' : ''}`);
+  }
+
+  // Complexity hotspots
+  if (r.complexityHotspots && r.complexityHotspots.length > 0) {
+    console.log(`\n  COMPLEXITY HOTSPOTS:`);
+    for (const h of r.complexityHotspots) {
+      console.log(`    ${h.file} (${h.sizeKB}KB${h.lines ? `, ${h.lines} lines` : ''}): ${h.indicators.join(', ')}`);
+    }
   }
 
   // Agent Safety
