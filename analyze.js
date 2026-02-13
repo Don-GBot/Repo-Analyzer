@@ -1084,6 +1084,182 @@ async function analyzeRepo(owner, repo) {
 
   results.backerVerification = backerVerification;
 
+  // 22. Agent safety / security risk assessment
+  if (v) console.error('Running security risk assessment...');
+  const agentSafety = { verdict: 'PASS', critical: [], warning: [], info: [] };
+
+  // 22a. Install script analysis (package.json hooks)
+  try {
+    const pkgContent3 = await getRaw(`https://raw.githubusercontent.com/${owner}/${repo}/${r.default_branch}/package.json`);
+    if (pkgContent3 && !pkgContent3.includes('404')) {
+      const pkg3 = JSON.parse(pkgContent3);
+      const dangerousHooks = ['preinstall', 'postinstall', 'install', 'prepare'];
+      for (const hook of dangerousHooks) {
+        if (pkg3.scripts?.[hook]) {
+          const script = pkg3.scripts[hook];
+          // Check what the hook does
+          if (/curl|wget|fetch|http|eval|exec|bash|sh -c/i.test(script)) {
+            agentSafety.critical.push(`package.json "${hook}" hook runs: "${script}" — executes code on install`);
+          } else {
+            agentSafety.warning.push(`package.json has "${hook}" hook: "${script}"`);
+          }
+        }
+      }
+    }
+  } catch {}
+
+  // 22b. Prompt injection detection — scan markdown files for injection patterns
+  const mdFiles = files.filter(f => /\.md$/i.test(f) && !f.includes('node_modules'));
+  const injectionPatterns = [
+    { pattern: /ignore\s+(all\s+)?previous\s+instructions/i, name: 'instruction override' },
+    { pattern: /you\s+are\s+now\s+/i, name: 'persona hijack' },
+    { pattern: /system\s*:\s*you/i, name: 'system prompt injection' },
+    { pattern: /do\s+not\s+reveal|never\s+mention\s+this/i, name: 'secrecy instruction' },
+    { pattern: /\{%|<%|<\?|{{.*}}/g, name: 'template injection syntax' },
+    { pattern: /<!--[\s\S]*?(ignore|override|inject|system|prompt)[\s\S]*?-->/i, name: 'hidden HTML comment with instructions' },
+    { pattern: /\[INST\]|\[\/INST\]|<\|im_start\|>|<\|system\|>/i, name: 'model prompt format tokens' },
+    { pattern: /assistant:\s*["']?I\s+(will|should|must)/i, name: 'fake assistant response' },
+  ];
+
+  // Sample up to 10 markdown files (prioritize SKILL.md, README, install docs)
+  const priorityMds = mdFiles.filter(f => /skill\.md|readme|install|setup|getting.started/i.test(f));
+  const otherMds = mdFiles.filter(f => !priorityMds.includes(f));
+  const mdSample = [...priorityMds, ...otherMds].slice(0, 10);
+
+  for (const mdFile of mdSample) {
+    try {
+      const mdContent = await getRaw(`https://raw.githubusercontent.com/${owner}/${repo}/${r.default_branch}/${mdFile}`);
+      if (!mdContent || mdContent.includes('404: Not Found')) continue;
+
+      for (const { pattern, name } of injectionPatterns) {
+        if (pattern.test(mdContent)) {
+          const isSkill = /skill\.md/i.test(mdFile);
+          const level = isSkill ? 'critical' : 'warning';
+          agentSafety[level].push(`${mdFile}: prompt injection pattern — ${name}`);
+        }
+      }
+
+      // Check for hidden unicode / zero-width characters (steganographic injection)
+      const zwChars = mdContent.match(/[\u200B\u200C\u200D\u2060\uFEFF]/g);
+      if (zwChars && zwChars.length > 5) {
+        agentSafety.warning.push(`${mdFile}: ${zwChars.length} zero-width characters — possible steganographic injection`);
+      }
+    } catch {}
+  }
+
+  // 22c. Credential harvesting — scan code for patterns that read AND exfiltrate secrets
+  const codeFileSample = files.filter(f => /\.(js|ts|py|sh|rb)$/i.test(f) && !f.includes('node_modules')).slice(0, 15);
+  const credReadPatterns = [
+    /\.openclaw|openclaw\.json/i,
+    /\.env\b(?!\.example|\.sample|\.template)/i,
+    /api[_-]?key|secret[_-]?key|private[_-]?key|wallet|mnemonic|seed.?phrase/i,
+    /\.ssh\/|id_rsa|id_ed25519/i,
+    /credentials|\.aws\/|\.kube\/config/i,
+  ];
+  const exfilPatterns = [
+    /fetch\s*\(|https?\.request|requests\.(get|post)|urllib/i,
+    /webhook|discord\.com\/api|telegram\..*sendMessage/i,
+    /upload|exfil|transmit|beacon/i,
+    /btoa|Buffer\.from.*base64|encode.*send/i,
+  ];
+
+  for (const codeFile of codeFileSample) {
+    try {
+      const codeContent = await getRaw(`https://raw.githubusercontent.com/${owner}/${repo}/${r.default_branch}/${codeFile}`);
+      if (!codeContent || codeContent.includes('404: Not Found')) continue;
+
+      // Skip minified/bundled files (they trigger everything)
+      const avgLineLen = codeContent.length / Math.max(codeContent.split('\n').length, 1);
+      if (avgLineLen > 500) { agentSafety.info.push(`${codeFile}: skipped (minified/bundled)`); continue; }
+
+      const readsCredentials = credReadPatterns.some(p => p.test(codeContent));
+      const hasExfil = exfilPatterns.some(p => p.test(codeContent));
+
+      // Exclude legitimate API usage: if all URLs in the file point to known APIs
+      const allUrls = codeContent.match(/https?:\/\/[^\s'"`)]+/g) || [];
+      const legitDomains = ['api.github.com', 'github.com', 'raw.githubusercontent.com', 'registry.npmjs.org', 'pypi.org', 'crates.io', 'api.hyperliquid.xyz', 'localhost', '127.0.0.1'];
+      const unknownUrls = allUrls.filter(u => { try { const h = new URL(u).hostname; return !legitDomains.some(d => h === d || h.endsWith('.' + d)); } catch { return false; } });
+      // If file has network calls but ALL URLs are to legit domains, it's likely just an API client
+      const onlyLegitNetwork = allUrls.length > 0 && unknownUrls.length === 0;
+
+      if (readsCredentials && hasExfil && !onlyLegitNetwork) {
+        agentSafety.critical.push(`${codeFile}: reads credentials AND has outbound network — possible exfiltration`);
+      } else if (readsCredentials && hasExfil && onlyLegitNetwork) {
+        agentSafety.info.push(`${codeFile}: reads credentials for legitimate API auth (GitHub/npm/PyPI)`);
+      } else if (readsCredentials) {
+        // Reading creds isn't inherently bad (configs do it), only flag if suspicious context
+        const linesWithCreds = codeContent.split('\n').filter(l => credReadPatterns.some(p => p.test(l)));
+        if (linesWithCreds.some(l => /read|open|load|parse|require/i.test(l) && /\.openclaw|\.ssh/i.test(l))) {
+          agentSafety.warning.push(`${codeFile}: reads sensitive paths (.openclaw, .ssh, etc.)`);
+        }
+      }
+
+      // Check for obfuscation in code files
+      const b64Blobs = codeContent.match(/['"][A-Za-z0-9+\/]{50,}={0,2}['"]/g);
+      if (b64Blobs && b64Blobs.length >= 2) {
+        agentSafety.warning.push(`${codeFile}: ${b64Blobs.length} large base64 strings — possible obfuscated payloads`);
+      }
+
+      // Hex-encoded payloads
+      if (/\\x[0-9a-f]{2}.*\\x[0-9a-f]{2}.*\\x[0-9a-f]{2}/i.test(codeContent)) {
+        agentSafety.warning.push(`${codeFile}: hex-encoded byte sequences — obfuscated content`);
+      }
+
+      // Crypto mining patterns
+      if (/stratum\+tcp|coinhive|cryptonight|hashrate|mining.*pool/i.test(codeContent)) {
+        agentSafety.critical.push(`${codeFile}: crypto mining patterns detected`);
+      }
+
+      // Shell injection via dynamic input
+      if (/exec\s*\(.*(\$\{|` *\$|process\.argv|req\.)/g.test(codeContent)) {
+        agentSafety.warning.push(`${codeFile}: dynamic input in exec/shell call — injection risk`);
+      }
+
+      // Permission escalation — writes to system paths
+      const sysPathWrites = codeContent.match(/(writeFile|fs\.write|>>?\s*)(.*)(\/etc\/|\/root\/|~\/\.|\.bashrc|\.profile|crontab|\.ssh\/)/g);
+      if (sysPathWrites) {
+        agentSafety.critical.push(`${codeFile}: writes to system paths — permission escalation risk`);
+      }
+    } catch {}
+  }
+
+  // 22d. Dangerous file types in repo
+  const dangerousExts = files.filter(f => /\.(exe|dll|so|dylib|bin|com|bat|cmd|msi|scr|vbs|ps1|wasm)$/i.test(f)
+    && !f.includes('node_modules') && !f.includes('vendor') && !/test|fixture|mock|example/i.test(f));
+  if (dangerousExts.length > 0) {
+    agentSafety.critical.push(`Executable/binary files: ${dangerousExts.slice(0, 5).join(', ')} — cannot audit, possible malware`);
+  }
+
+  // 22e. SKILL.md specific checks (if it's an OpenClaw skill)
+  const hasSkillMd = files.some(f => /^SKILL\.md$/i.test(f.split('/').pop()));
+  if (hasSkillMd) {
+    try {
+      const skillContent = await getRaw(`https://raw.githubusercontent.com/${owner}/${repo}/${r.default_branch}/SKILL.md`);
+      if (skillContent && !skillContent.includes('404: Not Found')) {
+        // Check for instructions to disable security
+        if (/disable.*security|bypass.*check|ignore.*warning|--no-verify|--force|trust.*all/i.test(skillContent)
+            && !/detect|flag|check|scan|warn|catches/i.test(skillContent)) {
+          agentSafety.critical.push('SKILL.md instructs disabling security checks');
+        }
+        // Sudo/root requirements
+        if (/\bsudo\b|as root|chmod 777|--privileged/i.test(skillContent)) {
+          agentSafety.warning.push('SKILL.md requests elevated privileges (sudo/root)');
+        }
+        // Pipe to shell
+        if (/curl.*\|\s*(ba)?sh|wget.*\|\s*(ba)?sh/i.test(skillContent)) {
+          agentSafety.critical.push('SKILL.md uses curl|bash install pattern — executes unaudited remote code');
+        }
+        agentSafety.info.push('OpenClaw skill detected — full SKILL.md audit performed');
+      }
+    } catch {}
+  }
+
+  // Set verdict
+  if (agentSafety.critical.length > 0) agentSafety.verdict = 'FAIL';
+  else if (agentSafety.warning.length > 0) agentSafety.verdict = 'CAUTION';
+
+  results.agentSafety = agentSafety;
+
   // --- SCORING ---
   const scores = {};
 
@@ -1170,9 +1346,18 @@ async function analyzeRepo(owner, repo) {
     scores.commits = Math.min(20, scores.commits + verifiedAuthors.length * 2);
   }
 
-  // Security (deductions from total)
+  // Security — old basic check (exposed files)
   let secDeduction = 0;
   if (secFlags.length > 0) { secDeduction = secFlags.length * 3; results.flags.push(...secFlags); }
+
+  // Agent Safety score (0-15) — new security module
+  let safetyScore = 15;
+  safetyScore -= Math.min(15, agentSafety.critical.length * 5); // each critical = -5
+  safetyScore -= Math.min(10, agentSafety.warning.length * 2);  // each warning = -2
+  scores.agentSafety2 = Math.max(0, Math.min(15, safetyScore));
+  if (agentSafety.critical.length > 0) {
+    for (const c of agentSafety.critical) results.flags.push(`🔴 SECURITY: ${c}`);
+  }
 
   // README quality (0-10)
   scores.readmeQuality = readmeQuality.score;
@@ -1212,7 +1397,7 @@ async function analyzeRepo(owner, repo) {
 
   // Total (normalize to 100)
   const rawTotal = Object.values(scores).reduce((a, b) => a + b, 0) - secDeduction;
-  const maxPossible = 135; // 20+15+25+15+10+10+5+10+10+10+5
+  const maxPossible = 150; // 20+15+25+15+10+10+5+10+10+10+5+15
   results.trustScore = Math.max(0, Math.min(100, Math.round(rawTotal / maxPossible * 100)));
   results.scores = scores;
 
@@ -1252,8 +1437,9 @@ function printReport(r) {
     maintainability: 'Maintainability',
     projectHealth: 'Project Health',
     originality: 'Originality',
+    agentSafety2: 'Agent Safety',
   };
-  const maxes = { commits: 20, contributors: 15, codeQuality: 25, aiAuthenticity: 15, social: 10, activity: 10, cryptoRisk: 5, readmeQuality: 10, maintainability: 10, projectHealth: 10, originality: 5 };
+  const maxes = { commits: 20, contributors: 15, codeQuality: 25, aiAuthenticity: 15, social: 10, activity: 10, cryptoRisk: 5, readmeQuality: 10, maintainability: 10, projectHealth: 10, originality: 5, agentSafety2: 15 };
   
   for (const [key, label] of Object.entries(labels)) {
     const score = r.scores[key];
@@ -1417,6 +1603,25 @@ function printReport(r) {
     console.log(`\n  BACKER CLAIMS:`);
     for (const v of r.backerVerification.verified) console.log(`    ✓ ${v}`);
     for (const u of r.backerVerification.unverified) console.log(`    ✗ ${u}`);
+  }
+
+  // Agent Safety
+  if (r.agentSafety) {
+    const as = r.agentSafety;
+    const vEmoji = { PASS: '🟢', CAUTION: '🟡', FAIL: '🔴' };
+    console.log(`\n  AGENT SAFETY: ${vEmoji[as.verdict]} ${as.verdict}`);
+    if (as.critical.length > 0) {
+      for (const c of as.critical) console.log(`    🔴 ${c}`);
+    }
+    if (as.warning.length > 0) {
+      for (const w of as.warning) console.log(`    🟡 ${w}`);
+    }
+    if (as.info.length > 0) {
+      for (const i of as.info) console.log(`    ℹ️  ${i}`);
+    }
+    if (as.verdict === 'PASS' && as.critical.length === 0 && as.warning.length === 0) {
+      console.log('    No security concerns detected.');
+    }
   }
 
   // Flags
