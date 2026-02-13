@@ -16,3 +16,5 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
       - run: node tests/test-analyze.js
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
