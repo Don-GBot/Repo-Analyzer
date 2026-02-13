@@ -1,6 +1,6 @@
 # Repo Analyzer ⚡
 
-Trust scoring for GitHub repos. One command, full breakdown. Built for crypto due diligence — spots faked commits, throwaway accounts, and generated READMEs.
+Trust scoring for GitHub repos. One command, full breakdown. Built for due diligence — spots faked commits, abandoned projects, unverified backers, and copy-paste code.
 
 ```
 node analyze.js <github-url-or-owner/repo>
@@ -8,125 +8,129 @@ node analyze.js <github-url-or-owner/repo>
 
 Zero dependencies. Node.js 20+ only.
 
-## What It Checks
+## Install as OpenClaw Skill
 
-**Commit Health** — real development or code dump? Detects evenly-spaced timestamps (faked history), checks GPG signatures, separates human vs bot commits (dependabot, github-actions)
+Drop `repo-analyzer.skill` into your OpenClaw skills directory, or:
 
-**Contributors** — checks account age, repo count, followers. Flags fresh throwaway accounts created just for the project
+```bash
+# From repo
+cp SKILL.md scripts/analyze.js ~/.openclaw/skills/repo-analyzer/
+```
 
-**Code Quality** — tests, CI/CD, license, lock files, docs, changelog, .gitignore. Missing basics = missing trust
+Then just ask your OpenClaw: *"analyze this repo"*, *"is this legit?"*, *"trust score for owner/repo"*
 
-**AI Detection** — scans README for generated text patterns, measures emoji density, flags long READMEs on repos with few commits
+## What It Checks (21 modules)
 
-**Social Signals** — star/fork ratio analysis. High stars with no forks and one contributor = likely botted
-
-**Activity** — last push date, release history, repo age vs commit count
-
-**Crypto Checks** — token mints from launchpads, placeholder program IDs (contract not deployed), hardcoded wallet addresses, rug pull patterns in config files
-
-**Security** — exposed credential files, private keys committed to repo (excludes test fixtures)
+| Category | What it catches |
+|----------|----------------|
+| **Commit Health** | Code dumps, faked timestamps, GPG signatures, human vs bot |
+| **Contributors** | Bus factor, throwaway accounts, contributor diversity |
+| **Code Quality** | Tests, CI/CD, license, lock files, docs, changelog |
+| **AI Detection** | Generated READMEs, emoji density, slop patterns |
+| **Social Signals** | Star/fork ratio, botted stars detection |
+| **Activity** | Push frequency, release history, repo age |
+| **Crypto Checks** | Token mints, placeholder contracts, rug patterns, wallet addresses |
+| **Security** | Exposed credentials, private keys in repo |
+| **README Quality** | Install guide, examples, structure, API docs |
+| **Maintainability** | File sizes, nesting depth, code/doc ratio |
+| **Project Health** | Abandoned detection, issue response time, PR review patterns, velocity trends |
+| **Originality** | Copy-paste detection, fork quality, template matching |
+| **Author Reputation** | Committers' other repos, org memberships, suspicious projects |
+| **Backer Verification** | README investor claims vs actual org membership |
+| **License Risk** | Permissive vs copyleft vs none |
 
 ## Trust Score
 
 0-100 with letter grade:
 
-- **A (85-100)** — Legit. Real development, real contributors, maintained.
+- **A (85+)** — Legit. Real development, real contributors, maintained.
 - **B (70-84)** — Solid. Minor gaps but probably trustworthy.
 - **C (55-69)** — Mixed. Needs more research before trusting.
 - **D (40-54)** — Sketchy. Multiple red flags.
-- **F (0-39)** — Avoid. Likely scam, fake, or abandoned.
+- **F (<40)** — Avoid. Likely scam, fake, or abandoned.
 
 ## Usage
 
 ```bash
-# Analyze any public repo
+# Single repo
 node analyze.js https://github.com/openclaw/openclaw
 node analyze.js owner/repo
 
-# JSON output for scripts/pipelines
+# Batch mode — analyze multiple repos
+node analyze.js --file repos.txt
+
+# JSON output for pipelines
 node analyze.js owner/repo --json
+
+# One-line mode for bots/scripts
+node analyze.js owner/repo --oneline
+# → owner/repo: 85/100 [A]
+
+# Shields.io badge markdown
+node analyze.js owner/repo --badge
+# → ![Trust Score](https://img.shields.io/badge/Trust_Score-85%2F100_A-brightgreen)
 
 # Verbose (shows progress)
 node analyze.js owner/repo --verbose
+```
 
-# Higher rate limits with GitHub token
-GITHUB_TOKEN=ghp_xxx node analyze.js owner/repo
+## Batch Mode
+
+Create a text file with one repo per line:
+
+```
+# repos.txt
+Uniswap/v3-core
+aave/aave-v3-core
+OpenZeppelin/openzeppelin-contracts
+```
+
+```bash
+node analyze.js --file repos.txt
+```
+
+Outputs scores, grade distribution, top/bottom rankings, and average.
+
+## GitHub Token (recommended)
+
+Without a token: 60 API requests/hour (~4 scans). With a token: 5,000/hour.
+
+```bash
+# Fine-grained PAT with public repo read-only access
+export GITHUB_TOKEN=github_pat_xxx
+node analyze.js owner/repo
 ```
 
 ## Sample Output
 
 ```
 ════════════════════════════════════════════════════════════
-  GITHUB REPO ANALYSIS: owner/repo
+  GITHUB REPO ANALYSIS: pancakeswap/pancake-smart-contracts
 ════════════════════════════════════════════════════════════
 
-  TRUST SCORE: 56/100 [C]
-  ███████████░░░░░░░░░
+  TRUST SCORE: 62/100 [C]
 
   BREAKDOWN:
-    Commit Health      █████░░░░░ 9/20
+    Commit Health      █████████░ 17/20
     Contributors       ███████░░░ 10/15
-    Code Quality       ████░░░░░░ 9/25
-    AI Authenticity    ██████████ 15/15
-    Social Signals     █████░░░░░ 5/10
-    Activity           ████████░░ 8/10
-    Crypto Safety      ░░░░░░░░░░ 0/5
+    Code Quality       ███████░░░ 17/25
+    Project Health     █░░░░░░░░░ 1/10
+    ...
 
-  FLAGS:
-    - Placeholder program ID — contract not deployed
-    - Launchpad token mint in config
-    - 0% GPG signed commits — author identity unverified
+  PROJECT HEALTH:
+    🔴 ABANDONED (last push 696d ago)
+    ⚠️ No commits in 696 days
 
-  VERDICT [C]: MIXED — Needs more research before trusting.
+  LICENSE: 🔴 No license — legally cannot use, fork, or modify
+
+  VERDICT [C]: MIXED — Some concerns. Do more research before trusting.
 ────────────────────────────────────────────────────────────
 ```
 
-## GitHub Token (recommended)
-
-Without a token: 60 API requests/hour (~7 repo scans). With a token: 5,000/hour.
-
-1. Go to [GitHub Settings → Developer settings → Fine-grained tokens](https://github.com/settings/tokens?type=beta)
-2. Generate new token — name it anything, set "Public repositories (read-only)", no other permissions
-3. Use it:
-
-```bash
-# Option A: env var (recommended)
-export GITHUB_TOKEN=github_pat_xxx
-node analyze.js owner/repo
-
-# Option B: per-command
-node analyze.js owner/repo --token github_pat_xxx
-```
-
-Each user needs their own token. Rate limits are per-token, not shared.
-
 ## How It Works
 
-Single script using the GitHub REST API. Pulls repo metadata, commit history, contributor profiles, file tree, and raw README content. Analyzes everything locally.
+Single script using the GitHub REST API. Pulls repo metadata, commit history, contributor profiles, file tree, README content, issues, and PRs. Analyzes everything locally — nothing leaves your machine.
 
 ## License
 
 MIT
-
-## Advanced Features
-
-### Author Identity Verification
-Cross-references commit emails against GitHub profiles. Detects:
-- Corporate email claims (e.g., `@venmo.com`) without GPG signatures
-- Commit name vs profile name mismatches
-- GitHub accounts created after first commit (retroactive attribution)
-- Unsigned commits from claimed corporate identities
-
-### Dependency Scanning
-Checks package.json, requirements.txt, and Cargo.toml for:
-- Unpinned versions (`*` or `latest`)
-- Typosquatting (common misspellings of popular packages)
-- Suspicious dependency formats
-
-### One-line Mode
-```bash
-node analyze.js owner/repo --oneline
-# Output: owner/repo: 67/100 [C] — 2 flags
-```
-
-Perfect for bots, scripts, Discord/Telegram integrations.
