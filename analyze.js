@@ -15,6 +15,8 @@ const { values: args, positionals } = parseArgs({
     'verbose': { type: 'boolean', default: false },
     'token': { type: 'string', default: '' },
     'oneline': { type: 'boolean', default: false },
+    'badge': { type: 'boolean', default: false },
+    'file': { type: 'string', default: '' },
   },
   allowPositionals: true,
   strict: false,
@@ -555,6 +557,144 @@ async function analyzeRepo(owner, repo) {
 
   results.security = { flags: secFlags };
 
+  // 11. README quality analysis
+  if (v) console.error('Analyzing README quality...');
+  const readmeQuality = { score: 0, maxScore: 10, checks: {} };
+  if (readmeContent && readmeContent.length > 50) {
+    // Installation instructions
+    readmeQuality.checks.hasInstall = /install|setup|getting started|quick start|prerequisites/i.test(readmeContent);
+    // Usage examples (code blocks with commands)
+    const codeBlocks = (readmeContent.match(/```[\s\S]*?```/g) || []);
+    readmeQuality.checks.hasCodeExamples = codeBlocks.length >= 1;
+    readmeQuality.checks.codeBlockCount = codeBlocks.length;
+    // API/function docs
+    readmeQuality.checks.hasApiDocs = /api|function|method|parameter|argument|returns?|endpoint/i.test(readmeContent);
+    // Contributing mention
+    readmeQuality.checks.hasContributing = /contribut/i.test(readmeContent);
+    // License mention
+    readmeQuality.checks.hasLicenseMention = /license|licence|mit|apache|gpl|bsd/i.test(readmeContent);
+    // Appropriate length (not too short for the repo size)
+    const readmeWords = readmeContent.split(/\s+/).length;
+    readmeQuality.checks.wordCount = readmeWords;
+    readmeQuality.checks.appropriateLength = readmeWords >= 50 && readmeWords <= 5000;
+    // Has sections/headings
+    const headings = (readmeContent.match(/^#{1,3}\s+.+/gm) || []);
+    readmeQuality.checks.hasStructure = headings.length >= 3;
+    readmeQuality.checks.headingCount = headings.length;
+
+    // Score
+    let rScore = 0;
+    if (readmeQuality.checks.hasInstall) rScore += 2;
+    if (readmeQuality.checks.hasCodeExamples) rScore += 2;
+    if (readmeQuality.checks.hasApiDocs) rScore += 1;
+    if (readmeQuality.checks.hasContributing) rScore += 1;
+    if (readmeQuality.checks.hasLicenseMention) rScore += 1;
+    if (readmeQuality.checks.appropriateLength) rScore += 1;
+    if (readmeQuality.checks.hasStructure) rScore += 2;
+    readmeQuality.score = rScore;
+  }
+  results.readmeQuality = readmeQuality;
+
+  // 12. Maintainability estimate
+  if (v) console.error('Estimating maintainability...');
+  const codeExts = ['js', 'ts', 'py', 'rb', 'go', 'rs', 'java', 'c', 'cpp', 'cs', 'php', 'swift', 'kt', 'scala', 'sol', 'move'];
+  const codeFiles = files.filter(f => {
+    const ext = f.split('.').pop()?.toLowerCase();
+    return codeExts.includes(ext);
+  });
+  const configExts = ['json', 'yaml', 'yml', 'toml', 'xml', 'ini', 'cfg', 'env'];
+  const configFiles2 = files.filter(f => {
+    const ext = f.split('.').pop()?.toLowerCase();
+    return configExts.includes(ext);
+  });
+  const docFiles = files.filter(f => /\.md$/i.test(f));
+
+  // Directory depth
+  const depths = files.map(f => f.split('/').length - 1);
+  const maxDepth = depths.length > 0 ? Math.max(...depths) : 0;
+  const avgDepth = depths.length > 0 ? depths.reduce((a, b) => a + b, 0) / depths.length : 0;
+
+  // File sizes (from tree, we have blob sizes)
+  const treeSizes = (treeRes.data?.tree || []).filter(t => t.type === 'blob').map(t => t.size || 0);
+  const avgFileSize = treeSizes.length > 0 ? treeSizes.reduce((a, b) => a + b, 0) / treeSizes.length : 0;
+  const maxFileSize = treeSizes.length > 0 ? Math.max(...treeSizes) : 0;
+  const largeFiles = treeSizes.filter(s => s > 50000).length; // >50KB
+
+  const maintainability = {
+    codeFiles: codeFiles.length,
+    configFiles: configFiles2.length,
+    docFiles: docFiles.length,
+    codeToDocRatio: docFiles.length > 0 ? Math.round(codeFiles.length / docFiles.length * 10) / 10 : codeFiles.length,
+    maxDepth,
+    avgDepth: Math.round(avgDepth * 10) / 10,
+    avgFileSize: Math.round(avgFileSize),
+    maxFileSize,
+    largeFiles,
+    score: 0,
+    maxScore: 10,
+  };
+
+  // Score maintainability
+  let mScore = 5;
+  if (maxDepth <= 5) mScore += 1; else if (maxDepth > 10) mScore -= 2;
+  if (largeFiles === 0) mScore += 1; else if (largeFiles > 5) mScore -= 2;
+  if (docFiles.length > 0) mScore += 1;
+  if (codeFiles.length > 0 && codeFiles.length < 500) mScore += 1;
+  else if (codeFiles.length >= 500) mScore -= 1;
+  if (avgFileSize < 10000) mScore += 1; // avg under 10KB = well-split
+  maintainability.score = Math.max(0, Math.min(10, mScore));
+  results.maintainability = maintainability;
+
+  // 13. Plugin/package format detection
+  if (v) console.error('Detecting plugin format...');
+  const pluginFormats = [];
+
+  // OpenClaw skill
+  if (files.some(f => /^SKILL\.md$/i.test(f.split('/').pop()))) {
+    const skillContent = await getRaw(`https://raw.githubusercontent.com/${owner}/${repo}/${r.default_branch}/SKILL.md`).catch(() => '');
+    const hasFrontmatter = /^---\s*\n[\s\S]*?name:[\s\S]*?description:[\s\S]*?---/m.test(skillContent);
+    pluginFormats.push({
+      type: 'OpenClaw Skill',
+      valid: hasFrontmatter,
+      details: hasFrontmatter ? 'Valid SKILL.md with frontmatter' : 'SKILL.md found but missing required name/description frontmatter',
+    });
+  }
+
+  // npm package
+  if (files.some(f => f === 'package.json')) {
+    const hasMain = readmeContent.includes('"main"') || readmeContent.includes('"exports"') || readmeContent.includes('"bin"');
+    pluginFormats.push({
+      type: 'npm package',
+      valid: true,
+      details: `package.json present${depInfo.totalDeps > 0 ? `, ${depInfo.totalDeps} deps` : ''}`,
+    });
+  }
+
+  // GitHub Action
+  if (files.some(f => f === 'action.yml' || f === 'action.yaml')) {
+    pluginFormats.push({ type: 'GitHub Action', valid: true, details: 'action.yml found' });
+  }
+
+  // VS Code extension
+  try {
+    const pkgContent2 = await getRaw(`https://raw.githubusercontent.com/${owner}/${repo}/${r.default_branch}/package.json`).catch(() => '');
+    if (pkgContent2 && pkgContent2.includes('"contributes"')) {
+      pluginFormats.push({ type: 'VS Code Extension', valid: true, details: 'package.json with contributes field' });
+    }
+  } catch {}
+
+  // Docker image
+  if (files.some(f => /^Dockerfile$/i.test(f))) {
+    pluginFormats.push({ type: 'Docker Image', valid: true, details: 'Dockerfile found' });
+  }
+
+  // Python package
+  if (files.some(f => f === 'setup.py' || f === 'pyproject.toml' || f === 'setup.cfg')) {
+    pluginFormats.push({ type: 'Python package', valid: true, details: 'Python packaging config found' });
+  }
+
+  results.pluginFormats = pluginFormats;
+
   // --- SCORING ---
   const scores = {};
 
@@ -645,9 +785,16 @@ async function analyzeRepo(owner, repo) {
   let secDeduction = 0;
   if (secFlags.length > 0) { secDeduction = secFlags.length * 3; results.flags.push(...secFlags); }
 
-  // Total
-  const total = Object.values(scores).reduce((a, b) => a + b, 0) - secDeduction;
-  results.trustScore = Math.max(0, Math.min(100, total));
+  // README quality (0-10)
+  scores.readmeQuality = readmeQuality.score;
+
+  // Maintainability (0-10)
+  scores.maintainability = maintainability.score;
+
+  // Total (normalize to 100)
+  const rawTotal = Object.values(scores).reduce((a, b) => a + b, 0) - secDeduction;
+  const maxPossible = 120; // 20+15+25+15+10+10+5+10+10
+  results.trustScore = Math.max(0, Math.min(100, Math.round(rawTotal / maxPossible * 100)));
   results.scores = scores;
 
   // Grade
@@ -682,8 +829,10 @@ function printReport(r) {
     social: 'Social Signals',
     activity: 'Activity',
     cryptoRisk: 'Crypto Safety',
+    readmeQuality: 'README Quality',
+    maintainability: 'Maintainability',
   };
-  const maxes = { commits: 20, contributors: 15, codeQuality: 25, aiAuthenticity: 15, social: 10, activity: 10, cryptoRisk: 5 };
+  const maxes = { commits: 20, contributors: 15, codeQuality: 25, aiAuthenticity: 15, social: 10, activity: 10, cryptoRisk: 5, readmeQuality: 10, maintainability: 10 };
   
   for (const [key, label] of Object.entries(labels)) {
     const score = r.scores[key];
@@ -761,6 +910,39 @@ function printReport(r) {
     }
   }
 
+  // Plugin formats
+  if (r.pluginFormats && r.pluginFormats.length > 0) {
+    console.log(`\n  PACKAGE FORMAT:`);
+    for (const p of r.pluginFormats) {
+      const status = p.valid ? '✓' : '✗';
+      console.log(`    ${status} ${p.type} — ${p.details}`);
+    }
+  }
+
+  // Maintainability
+  if (r.maintainability) {
+    const m = r.maintainability;
+    console.log(`\n  MAINTAINABILITY:`);
+    console.log(`    Code: ${m.codeFiles} files | Config: ${m.configFiles} | Docs: ${m.docFiles} | Code/Doc ratio: ${m.codeToDocRatio}`);
+    console.log(`    Depth: max ${m.maxDepth}, avg ${m.avgDepth} | Avg file: ${(m.avgFileSize/1024).toFixed(1)}KB | Large files (>50KB): ${m.largeFiles}`);
+  }
+
+  // README quality
+  if (r.readmeQuality && r.readmeQuality.score > 0) {
+    const rq = r.readmeQuality.checks;
+    const checks = [
+      ['Install guide', rq.hasInstall],
+      ['Code examples', rq.hasCodeExamples],
+      ['API docs', rq.hasApiDocs],
+      ['Structure', rq.hasStructure],
+      ['Contributing', rq.hasContributing],
+      ['License', rq.hasLicenseMention],
+    ];
+    console.log(`\n  README QUALITY (${r.readmeQuality.score}/${r.readmeQuality.maxScore}):`);
+    console.log(`    ${checks.map(([name, has]) => `${has ? '+' : '-'}${name}`).join('  ')}`);
+    console.log(`    ${rq.wordCount} words, ${rq.headingCount} headings, ${rq.codeBlockCount} code blocks`);
+  }
+
   // Flags
   if (r.flags.length > 0) {
     console.log(`\n  🚩 FLAGS:`);
@@ -785,11 +967,83 @@ function printReport(r) {
   console.log(`${'─'.repeat(60)}\n`);
 }
 
+// --- Badge generation ---
+function generateBadge(results) {
+  const score = results.trustScore;
+  const grade = results.grade;
+  let color = 'red';
+  if (grade === 'A') color = 'brightgreen';
+  else if (grade === 'B') color = 'green';
+  else if (grade === 'C') color = 'yellow';
+  else if (grade === 'D') color = 'orange';
+  const label = `Trust_Score-${score}%2F100_${grade}`;
+  return `![Trust Score](https://img.shields.io/badge/${label}-${color}?style=flat-square)`;
+}
+
+// --- Batch mode ---
+async function batchAnalyze(filePath) {
+  const fs = require('fs');
+  const lines = fs.readFileSync(filePath, 'utf8').split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+  
+  console.log(`\nBatch analyzing ${lines.length} repos...\n`);
+  const results = [];
+  
+  for (const line of lines) {
+    const parsed = parseRepo(line);
+    if (!parsed) {
+      console.error(`  ✗ Cannot parse: ${line}`);
+      continue;
+    }
+    try {
+      const r = await analyzeRepo(parsed.owner, parsed.repo);
+      results.push(r);
+      const flagStr = r.flags.length > 0 ? ` (${r.flags.length} flags)` : '';
+      console.log(`  ${r.grade} ${String(r.trustScore).padStart(3)}/100  ${r.meta.name}${flagStr}`);
+      // Small delay to avoid rate limits
+      await new Promise(resolve => setTimeout(resolve, 500));
+    } catch (e) {
+      console.error(`  ✗ ${parsed.owner}/${parsed.repo}: ${e.message}`);
+    }
+  }
+  
+  // Summary
+  console.log(`\n${'═'.repeat(50)}`);
+  console.log(`  BATCH SUMMARY: ${results.length} repos analyzed`);
+  console.log(`${'═'.repeat(50)}`);
+  
+  const grades = { A: 0, B: 0, C: 0, D: 0, F: 0 };
+  for (const r of results) grades[r.grade]++;
+  console.log(`  A: ${grades.A} | B: ${grades.B} | C: ${grades.C} | D: ${grades.D} | F: ${grades.F}`);
+  
+  const avg = results.length > 0 ? Math.round(results.reduce((a, r) => a + r.trustScore, 0) / results.length) : 0;
+  console.log(`  Average score: ${avg}/100`);
+  
+  // Top and bottom
+  const sorted = [...results].sort((a, b) => b.trustScore - a.trustScore);
+  if (sorted.length >= 3) {
+    console.log(`\n  TOP 3:`);
+    for (const r of sorted.slice(0, 3)) console.log(`    ${r.trustScore}/100 [${r.grade}] ${r.meta.name}`);
+    console.log(`\n  BOTTOM 3:`);
+    for (const r of sorted.slice(-3).reverse()) console.log(`    ${r.trustScore}/100 [${r.grade}] ${r.meta.name}`);
+  }
+  console.log();
+  
+  return results;
+}
+
 // --- Main ---
 async function main() {
+  // Batch mode
+  if (args.file) {
+    const results = await batchAnalyze(args.file);
+    if (args.json) console.log(JSON.stringify(results, null, 2));
+    return;
+  }
+
   const input = positionals[0];
   if (!input) {
-    console.error('Usage: node analyze.js <github-url-or-owner/repo> [--json] [--verbose]');
+    console.error('Usage: node analyze.js <github-url-or-owner/repo> [--json] [--verbose] [--oneline] [--badge]');
+    console.error('       node analyze.js --file repos.txt [--json]');
     console.error('  Optional: --token <github-token> or GITHUB_TOKEN env var for higher rate limits');
     process.exit(1);
   }
@@ -802,7 +1056,9 @@ async function main() {
 
   try {
     const results = await analyzeRepo(parsed.owner, parsed.repo);
-    if (args.oneline) {
+    if (args.badge) {
+      console.log(generateBadge(results));
+    } else if (args.oneline) {
       const flagCount = results.flags.length;
       const flagStr = flagCount > 0 ? ` — ${flagCount} flag${flagCount > 1 ? 's' : ''}` : '';
       console.log(`${results.meta.name}: ${results.trustScore}/100 [${results.grade}]${flagStr}`);
