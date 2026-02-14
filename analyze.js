@@ -1192,6 +1192,7 @@ async function analyzeRepo(owner, repo) {
   // 22b. Prompt injection detection — scan markdown files for injection patterns
   const mdFiles = files.filter(f => /\.md$/i.test(f) && !f.includes('node_modules'));
   const injectionPatterns = [
+    // English patterns
     { pattern: /ignore\s+(all\s+)?previous\s+instructions/i, name: 'instruction override' },
     { pattern: /you\s+are\s+now\s+/i, name: 'persona hijack' },
     { pattern: /system\s*:\s*you/i, name: 'system prompt injection' },
@@ -1200,6 +1201,34 @@ async function analyzeRepo(owner, repo) {
     { pattern: /<!--[\s\S]*?(ignore|override|inject|system|prompt)[\s\S]*?-->/i, name: 'hidden HTML comment with instructions' },
     { pattern: /\[INST\]|\[\/INST\]|<\|im_start\|>|<\|system\|>/i, name: 'model prompt format tokens' },
     { pattern: /assistant:\s*["']?I\s+(will|should|must)/i, name: 'fake assistant response' },
+    // Multilingual prompt injection — the $37.5K bypass technique
+    // Thai
+    { pattern: /เพิกเฉยคำสั่ง|ละเว้นคำแนะนำ|คุณคือตอนนี้|ระบบ\s*:\s*คุณ/i, name: 'Thai prompt injection' },
+    // Arabic
+    { pattern: /تجاهل\s*(جميع\s*)?التعليمات|أنت\s+الآن|نظام\s*:\s*أنت|لا\s+تكشف/i, name: 'Arabic prompt injection' },
+    // Chinese (Simplified + Traditional)
+    { pattern: /忽略(所有)?之前的指[令示]|你现在是|系统\s*[:：]\s*你|不要透露|忽略(所有)?之前的指[令示]|你現在是/i, name: 'Chinese prompt injection' },
+    // Russian
+    { pattern: /игнорируй\s+(все\s+)?предыдущие\s+инструкции|ты\s+теперь|система\s*:\s*ты/i, name: 'Russian prompt injection' },
+    // Spanish
+    { pattern: /ignora\s+(todas?\s+)?las?\s+instrucciones\s+anteriores|ahora\s+eres|sistema\s*:\s*tú/i, name: 'Spanish prompt injection' },
+    // French
+    { pattern: /ignore[rz]?\s+(toutes?\s+)?les?\s+instructions\s+précédentes|tu\s+es\s+maintenant|système\s*:\s*tu/i, name: 'French prompt injection' },
+    // Japanese
+    { pattern: /以前の指示を無視|あなたは今|システム\s*[:：]\s*あなた/i, name: 'Japanese prompt injection' },
+    // Korean
+    { pattern: /이전\s*지시를?\s*무시|너는\s*이제|시스템\s*[:：]\s*너/i, name: 'Korean prompt injection' },
+    // Hindi
+    { pattern: /पिछले\s*निर्देशों?\s*को\s*अनदेखा|अब\s*तुम|सिस्टम\s*:\s*तुम/i, name: 'Hindi prompt injection' },
+    // Portuguese
+    { pattern: /ignore\s+(todas?\s+)?as?\s+instruções\s+anteriores|você\s+agora\s+é|sistema\s*:\s*você/i, name: 'Portuguese prompt injection' },
+    // German
+    { pattern: /ignoriere?\s+(alle\s+)?vorherigen\s+Anweisungen|du\s+bist\s+jetzt|System\s*:\s*du/i, name: 'German prompt injection' },
+    // Mixed-script / polyglot evasion (e.g., mixing Latin + CJK + Arabic in same line to confuse filters)
+    { pattern: /[\u0600-\u06FF].*ignore.*instruction|ignore.*[\u0600-\u06FF].*instruction/i, name: 'mixed-script injection evasion (Arabic+Latin)' },
+    { pattern: /[\u0E00-\u0E7F].*ignore.*instruction|ignore.*[\u0E00-\u0E7F].*instruction/i, name: 'mixed-script injection evasion (Thai+Latin)' },
+    // Unicode homoglyph attack (Cyrillic/Greek chars masquerading as Latin)
+    { pattern: /[\u0400-\u04FF][\u0041-\u005A\u0061-\u007A]{3,}|[\u0041-\u005A\u0061-\u007A]{3,}[\u0400-\u04FF]/i, name: 'Unicode homoglyph mixing (Cyrillic+Latin)' },
   ];
 
   // Sample up to 10 markdown files (prioritize SKILL.md, README, install docs)
