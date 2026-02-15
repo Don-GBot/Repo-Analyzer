@@ -29,10 +29,11 @@ node scripts/analyze.js --file <repos.txt> [--json]
 - `--file <path>` — batch mode, one repo per line (# comments ok)
 
 ### Environment
-Requires `GITHUB_TOKEN` for 5000 req/hr. Without it: 60 req/hr (batch won't work).
-Load with: `source ~/.bashrc` or `export GITHUB_TOKEN="..."`.
+**CRITICAL:** Always run with GITHUB_TOKEN loaded. Without it, scores are severely degraded (missing stars, forks, commits).
+Before running: `source ~/.bashrc` (token is in ~/.bashrc as GITHUB_TOKEN).
+Or pass explicitly: `GITHUB_TOKEN="$(grep GITHUB_TOKEN ~/.bashrc | cut -d'"' -f2)" node scripts/analyze.js ...`
 
-## Scoring (12 categories, 150pts normalized to 100)
+## Scoring (14 categories, 168pts normalized to 100)
 
 | Category | Max | What it checks |
 |----------|-----|----------------|
@@ -43,10 +44,12 @@ Load with: `source ~/.bashrc` or `export GITHUB_TOKEN="..."`.
 | Social | 10 | Stars, forks, star/fork ratio, botted stars |
 | Activity | 10 | Recent pushes, releases |
 | Crypto Safety | 5 | Token mints, rug patterns, wallet addresses |
+| Dependency Audit | 10 | Known malicious packages, typosquatting, install hooks, lock files |
+| Fork Quality | 8 | Fork divergence, suspicious changes, gutted vs meaningful forks |
 | README Quality | 10 | Install guide, examples, structure, API docs |
 | Maintainability | 10 | File sizes, nesting, code/doc ratio |
 | Project Health | 10 | Abandoned detection, velocity, issue response, PR review |
-| Originality | 5 | Copy-paste, fork quality, backer verification |
+| Originality | 5 | Copy-paste, template detection, backer verification |
 | Agent Safety | 15 | Install hooks, prompt injection, secrets, CI audit, permissions |
 
 ## Grade Scale
@@ -57,6 +60,8 @@ Load with: `source ~/.bashrc` or `export GITHUB_TOKEN="..."`.
 - F (<40): AVOID
 
 ## Key Features
+- **Enhanced dependency audit**: Detects known malicious packages (event-stream, ua-parser-js, etc.), typosquatting attacks, install hooks, and estimates transitive dependency bloat
+- **Fork comparison**: Analyzes fork divergence, detects cosmetic vs meaningful changes, flags suspicious modifications (removed CI, added wallets), identifies gutted forks
 - **Agent safety**: Detects prompt injection, credential harvesting, install script hooks, obfuscated code
 - **Secrets detection**: Finds hardcoded API keys, tokens, private keys via regex + entropy
 - **Network mapping**: Categorizes all outbound domains (API, CDN, unknown)
