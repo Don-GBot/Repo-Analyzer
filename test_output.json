@@ -1,0 +1,511 @@
+{
+  "meta": {
+    "name": "Uniswap/v3-core",
+    "description": "🦄 🦄 🦄 Core smart contracts of Uniswap v3",
+    "language": "TypeScript",
+    "stars": 4947,
+    "forks": 3039,
+    "watchers": 145,
+    "openIssues": 86,
+    "createdAt": "2020-04-29T20:27:00Z",
+    "updatedAt": "2026-02-13T12:23:00Z",
+    "pushedAt": "2024-11-03T23:23:44Z",
+    "size": 6522,
+    "defaultBranch": "main",
+    "hasIssues": true,
+    "hasWiki": false,
+    "license": "NOASSERTION",
+    "isForked": false,
+    "parent": null,
+    "archived": false,
+    "topics": [
+      "automated-market-maker",
+      "core",
+      "ethereum",
+      "smart-contracts"
+    ]
+  },
+  "commits": {
+    "total": 100,
+    "human": 100,
+    "bot": 0,
+    "authors": [
+      {
+        "email": "emag3m@gmail.com",
+        "name": "Emily Williams",
+        "commits": 2,
+        "firstCommit": "2023-03-16T20:24:31Z",
+        "lastCommit": "2023-03-16T20:21:38Z"
+      },
+      {
+        "email": "lint-action@samuelmeuli.com",
+        "name": "Lint Action",
+        "commits": 4,
+        "firstCommit": "2022-10-31T02:26:10Z",
+        "lastCommit": "2021-03-17T18:16:30Z"
+      },
+      {
+        "email": "40770586+marktoda@users.noreply.github.com",
+        "name": "marktoda",
+        "commits": 1,
+        "firstCommit": "2022-07-13T18:48:04Z",
+        "lastCommit": "2022-07-13T18:48:04Z"
+      },
+      {
+        "email": "noahwz@gmail.com",
+        "name": "Noah Zinsmeister",
+        "commits": 16,
+        "firstCommit": "2022-05-11T17:41:04Z",
+        "lastCommit": "2021-02-11T19:02:49Z"
+      },
+      {
+        "email": "cusackw@gmail.com",
+        "name": "wilsoncusack",
+        "commits": 1,
+        "firstCommit": "2022-01-26T20:54:24Z",
+        "lastCommit": "2022-01-26T20:54:24Z"
+      },
+      {
+        "email": "moody.salem@gmail.com",
+        "name": "Moody Salem",
+        "commits": 53,
+        "firstCommit": "2022-01-05T19:03:56Z",
+        "lastCommit": "2021-02-12T16:37:38Z"
+      },
+      {
+        "email": "34962750+hensha256@users.noreply.github.com",
+        "name": "Alice",
+        "commits": 1,
+        "firstCommit": "2021-09-16T18:27:10Z",
+        "lastCommit": "2021-09-16T18:27:10Z"
+      },
+      {
+        "email": "moodysalem@users.noreply.github.com",
+        "name": "Moody Salem",
+        "commits": 18,
+        "firstCommit": "2021-05-04T16:44:40Z",
+        "lastCommit": "2021-02-16T15:50:45Z"
+      },
+      {
+        "email": "connor@uniswap.org",
+        "name": "Connor Martin",
+        "commits": 2,
+        "firstCommit": "2021-03-22T19:18:27Z",
+        "lastCommit": "2021-03-22T16:19:48Z"
+      },
+      {
+        "email": "30504811+snreynolds@users.noreply.github.com",
+        "name": "Sara Reynolds",
+        "commits": 1,
+        "firstCommit": "2021-03-22T04:44:19Z",
+        "lastCommit": "2021-03-22T04:44:19Z"
+      },
+      {
+        "email": "rmi7@users.noreply.github.com",
+        "name": "Alexander Remie",
+        "commits": 1,
+        "firstCommit": "2021-03-19T20:57:51Z",
+        "lastCommit": "2021-03-19T20:57:51Z"
+      }
+    ],
+    "gpgSigned": 96,
+    "gpgRate": 96,
+    "commitsPerDay": 0.05,
+    "isCodeDump": false,
+    "evenlySpaced": false,
+    "oldestCommit": "2021-02-11T19:02:49.000Z",
+    "newestCommit": "2023-03-16T20:24:31.000Z"
+  },
+  "contributors": {
+    "total": 14,
+    "busFactor": 5,
+    "topContributors": [
+      {
+        "login": "moodysalem",
+        "contributions": 484
+      },
+      {
+        "login": "NoahZinsmeister",
+        "contributions": 340
+      },
+      {
+        "login": "danrobinson",
+        "contributions": 92
+      },
+      {
+        "login": "haydenadams",
+        "contributions": 28
+      },
+      {
+        "login": "lint-action",
+        "contributions": 22
+      }
+    ],
+    "suspiciousAccounts": []
+  },
+  "activity": {
+    "daysSinceLastPush": 468,
+    "ageDays": 2117,
+    "issues": {
+      "open": 86
+    },
+    "releases": 0,
+    "latestRelease": null
+  },
+  "codeQuality": {
+    "totalFiles": 148,
+    "hasTests": true,
+    "hasCI": true,
+    "hasLicense": true,
+    "hasReadme": true,
+    "hasGitignore": true,
+    "hasPackageLock": true,
+    "hasDockerfile": false,
+    "hasDocs": false,
+    "hasChangelog": false,
+    "hasContributing": false,
+    "hasSecurityPolicy": false,
+    "extensions": [
+      [
+        "sol",
+        69
+      ],
+      [
+        "ts",
+        23
+      ],
+      [
+        "snap",
+        12
+      ],
+      [
+        "yml",
+        6
+      ],
+      [
+        "json",
+        3
+      ],
+      [
+        "md",
+        3
+      ],
+      [
+        "yaml",
+        3
+      ],
+      [
+        "pdf",
+        2
+      ],
+      [
+        "github",
+        1
+      ],
+      [
+        "yarnrc",
+        1
+      ]
+    ],
+    "aiSlop": {
+      "hits": 0,
+      "patterns": [],
+      "emojiDensity": 0,
+      "readmeLength": 3017
+    }
+  },
+  "social": {
+    "stars": 4947,
+    "forks": 3039,
+    "starForkRatio": 1.6,
+    "starsPerDay": 2.34,
+    "bottedStars": false
+  },
+  "crypto": {
+    "flags": [],
+    "hasCryptoContent": true
+  },
+  "security": {
+    "flags": []
+  },
+  "scores": {
+    "commits": 20,
+    "contributors": 12,
+    "codeQuality": 19,
+    "aiAuthenticity": 15,
+    "social": 9,
+    "activity": 2,
+    "cryptoRisk": 5,
+    "dependencyAudit": 6,
+    "agentSafety2": 11,
+    "readmeQuality": 9,
+    "maintainability": 8,
+    "projectHealth": 0,
+    "forkComparison": 5,
+    "originality": 3
+  },
+  "grade": "B",
+  "trustScore": 74,
+  "flags": [
+    "No license detected — all rights reserved by default"
+  ],
+  "warnings": [
+    "No commits in over a year"
+  ],
+  "dependencies": {
+    "totalDeps": 22,
+    "directDeps": 0,
+    "devDeps": 22,
+    "transitiveDeps": 1948,
+    "outdated": [],
+    "suspicious": [],
+    "malicious": [],
+    "installHooks": [],
+    "typosquats": [],
+    "hasLockFile": true,
+    "score": 6,
+    "flags": []
+  },
+  "authorVerification": [
+    {
+      "email": "emag3m@gmail.com",
+      "name": "Emily Williams",
+      "verified": true,
+      "flags": [
+        "2/2 commits GPG-signed — cryptographically verified"
+      ],
+      "githubUser": "ewilz",
+      "profileName": "Emily Williams",
+      "publicRepos": 54,
+      "followers": 357,
+      "createdAt": "2013-09-25T12:59:26Z",
+      "bio": null,
+      "company": "Uniswap",
+      "gpgSigned": 2,
+      "gpgTotal": 2
+    },
+    {
+      "email": "lint-action@samuelmeuli.com",
+      "name": "Lint Action",
+      "verified": false,
+      "flags": [],
+      "gpgSigned": 0,
+      "gpgTotal": 4
+    },
+    {
+      "email": "40770586+marktoda@users.noreply.github.com",
+      "name": "marktoda",
+      "verified": true,
+      "flags": [
+        "Using GitHub noreply email — identity hidden",
+        "1/1 commits GPG-signed — cryptographically verified"
+      ],
+      "gpgSigned": 1,
+      "gpgTotal": 1
+    },
+    {
+      "email": "noahwz@gmail.com",
+      "name": "Noah Zinsmeister",
+      "verified": true,
+      "flags": [
+        "16/16 commits GPG-signed — cryptographically verified"
+      ],
+      "gpgSigned": 16,
+      "gpgTotal": 16
+    },
+    {
+      "email": "cusackw@gmail.com",
+      "name": "wilsoncusack",
+      "verified": true,
+      "flags": [
+        "1/1 commits GPG-signed — cryptographically verified"
+      ],
+      "gpgSigned": 1,
+      "gpgTotal": 1
+    }
+  ],
+  "authorReputation": [
+    {
+      "user": "ewilz",
+      "name": "Emily Williams",
+      "notes": [
+        "Account 12+ years old",
+        "⚠️ 73% of repos are forks"
+      ]
+    }
+  ],
+  "readmeQuality": {
+    "score": 9,
+    "maxScore": 10,
+    "checks": {
+      "hasInstall": true,
+      "hasCodeExamples": true,
+      "codeBlockCount": 2,
+      "hasApiDocs": true,
+      "hasContributing": false,
+      "hasLicenseMention": true,
+      "wordCount": 259,
+      "appropriateLength": true,
+      "hasStructure": true,
+      "headingCount": 6
+    }
+  },
+  "maintainability": {
+    "codeFiles": 92,
+    "configFiles": 12,
+    "docFiles": 3,
+    "codeToDocRatio": 30.7,
+    "maxDepth": 5,
+    "avgDepth": 1.9,
+    "avgFileSize": 22104,
+    "maxFileSize": 1149996,
+    "largeFiles": 5,
+    "score": 8,
+    "maxScore": 10
+  },
+  "pluginFormats": [
+    {
+      "type": "npm package",
+      "valid": true,
+      "details": "package.json present, 22 deps"
+    }
+  ],
+  "licenseRisk": {
+    "license": "NOASSERTION",
+    "risk": "high",
+    "details": "No license — legally cannot use, fork, or modify"
+  },
+  "projectStatus": {
+    "status": "abandoned",
+    "signals": [
+      "No commits in 468 days",
+      "3 issues open 90+ days with zero responses"
+    ],
+    "daysSincePush": 468
+  },
+  "forkAnalysis": {
+    "isFork": false,
+    "parent": null,
+    "summary": null,
+    "quality": "not-fork",
+    "score": 5,
+    "findings": []
+  },
+  "velocityTrend": {
+    "trend": "declining",
+    "periods": [],
+    "recentRate": 0.07,
+    "olderRate": 2.28
+  },
+  "issueResponse": {
+    "avgResponseHrs": null,
+    "respondedPct": null,
+    "sampleSize": 1
+  },
+  "prPatterns": {
+    "selfMerged": 0,
+    "reviewed": 2,
+    "total": 2,
+    "pattern": "unknown"
+  },
+  "copyPaste": {
+    "isTemplate": false,
+    "templateMatch": null,
+    "signals": []
+  },
+  "backerVerification": {
+    "claims": [],
+    "verified": [],
+    "unverified": []
+  },
+  "agentSafety": {
+    "verdict": "CAUTION",
+    "critical": [],
+    "warning": [
+      "test/FullMath.spec.ts: 4 large base64 strings — possible obfuscated payloads",
+      "Estimated 2597+ transitive dependencies — large attack surface"
+    ],
+    "info": []
+  },
+  "networkMap": {
+    "domains": {
+      "API": [
+        "github.com"
+      ]
+    },
+    "unknown": [],
+    "total": 2
+  },
+  "secretFindings": [],
+  "actionsAudit": {
+    "workflows": 4,
+    "findings": [
+      {
+        "file": ".github/workflows/mythx.yml",
+        "issue": "Secrets interpolated in shell run command — injection risk if inputs are untrusted",
+        "severity": "warning"
+      },
+      {
+        "file": ".github/workflows/mythx.yml",
+        "issue": "Manual trigger (workflow_dispatch) enabled",
+        "severity": "info"
+      }
+    ]
+  },
+  "permissions": {
+    "network": true,
+    "fileWrite": false,
+    "fileRead": false,
+    "envVars": [
+      "ETHERSCAN_API_KEY",
+      "INFURA_API_KEY"
+    ],
+    "systemCommands": true,
+    "crypto": true,
+    "details": [
+      "Network: API",
+      "System commands: hardhat.config.ts",
+      "Env vars: ETHERSCAN_API_KEY, INFURA_API_KEY",
+      "Cryptographic operations"
+    ]
+  },
+  "securityHistory": {
+    "advisories": [],
+    "dependabotAlerts": false,
+    "hasSecurityPolicy": false
+  },
+  "depTreeInfo": {
+    "hasLockFile": true,
+    "estimatedTransitive": 2597,
+    "bloated": true
+  },
+  "complexityHotspots": [
+    {
+      "file": "test/UniswapV3Pool.spec.ts",
+      "sizeKB": 84,
+      "indicators": [
+        "large file",
+        "226 functions"
+      ],
+      "lines": 2044
+    },
+    {
+      "file": "contracts/UniswapV3Pool.sol",
+      "sizeKB": 35,
+      "indicators": [
+        "large file",
+        "deep nesting (14 levels)"
+      ],
+      "lines": 870
+    },
+    {
+      "file": "test/Oracle.spec.ts",
+      "sizeKB": 34,
+      "indicators": [
+        "large file",
+        "100 functions"
+      ],
+      "lines": 799
+    }
+  ]
+}
